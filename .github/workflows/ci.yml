@@ -1,0 +1,71 @@
+name: CI
+
+# Build-checks every push and pull request. Does not publish anything —
+# releases are handled by release.yml on version tags.
+on:
+  push:
+    branches: ['**']
+    tags-ignore: ['**']   # tags are handled by release.yml
+  pull_request:
+
+# A newer push to the same branch/PR cancels an in-flight run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  macos-metal:
+    name: macOS Metal (arm64)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v6
+      - name: Verify Metal sources embed cleanly
+        run: make check-metal-sources
+      - name: Build executables
+        run: make
+      - name: Build shared library
+        run: make shared
+      - name: Build test binary
+        run: make ds4_test
+
+  linux-cuda-x86_64:
+    name: Linux CUDA (x86_64)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install CUDA toolkit
+        run: |
+          wget -q https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb
+          sudo dpkg -i cuda-keyring_1.1-1_all.deb
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cuda-toolkit-12-8
+      - name: Build shared library (CUDA)
+        run: |
+          export PATH="/usr/local/cuda/bin:$PATH"
+          make shared
+      - name: Build CPU-only variant
+        run: |
+          make clean
+          make cpu
+          make shared-cpu
+
+  linux-cuda-arm64:
+    name: Linux CUDA (arm64/sbsa)
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install CUDA toolkit
+        run: |
+          wget -q https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/sbsa/cuda-keyring_1.1-1_all.deb
+          sudo dpkg -i cuda-keyring_1.1-1_all.deb
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cuda-toolkit-12-8
+      - name: Build shared library (CUDA)
+        run: |
+          export PATH="/usr/local/cuda/bin:$PATH"
+          make shared
+      - name: Build CPU-only variant
+        run: |
+          make clean
+          make cpu
+          make shared-cpu
