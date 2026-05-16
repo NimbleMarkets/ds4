@@ -8,10 +8,30 @@ NATIVE_CPU_FLAG ?= -march=native
 endif
 
 CFLAGS ?= -O3 -ffast-math $(NATIVE_CPU_FLAG) -Wall -Wextra -std=c99
-OBJCFLAGS ?= -O3 -ffast-math $(NATIVE_CPU_FLAG) -Wall -Wextra -fobjc-arc
+OBJCFLAGS ?= -O3 -ffast-math $(NATIVE_CPU_FLAG) -Wall -Wextra -Wno-c23-extensions -fobjc-arc
 
 LDLIBS ?= -lm -pthread
-METAL_SRCS := $(wildcard metal/*.metal)
+METAL_SRCS := \
+	metal/flash_attn.metal \
+	metal/dense.metal \
+	metal/moe.metal \
+	metal/dsv4_hc.metal \
+	metal/unary.metal \
+	metal/dsv4_kv.metal \
+	metal/dsv4_rope.metal \
+	metal/dsv4_misc.metal \
+	metal/argsort.metal \
+	metal/cpy.metal \
+	metal/concat.metal \
+	metal/get_rows.metal \
+	metal/sum_rows.metal \
+	metal/softmax.metal \
+	metal/repeat.metal \
+	metal/glu.metal \
+	metal/norm.metal \
+	metal/bin.metal \
+	metal/set_rows.metal
+METAL_EMBED := ds4_metal_sources.inc
 
 ifeq ($(UNAME_S),Darwin)
 METAL_LDLIBS := $(LDLIBS) -framework Foundation -framework Metal
@@ -44,7 +64,7 @@ SHLIB := libds4.so
 endif
 
 .PHONY: all help clean test cpu cuda cuda-spark cuda-generic cuda-regression \
-        shared shared-cpu install-shared
+        shared shared-cpu install-shared check-metal-sources
 
 ifeq ($(UNAME_S),Darwin)
 all: ds4 ds4-server ds4-bench ds4-eval
@@ -56,6 +76,7 @@ help:
 	@echo "  make shared       Build Metal ./$(SHLIB) (FFI shared library)"
 	@echo "  make shared-cpu   Build CPU-only ./$(SHLIB)"
 	@echo "  make install-shared  Build ./$(SHLIB) and install it to $(LIBDIR)"
+	@echo "  make check-metal-sources  Verify #embed can read every Metal source"
 	@echo "  make test         Build and run tests"
 	@echo "  make clean        Remove build outputs"
 
@@ -97,6 +118,7 @@ help:
 	@echo "  make shared [CUDA_ARCH=] Build CUDA ./$(SHLIB) (FFI shared library)"
 	@echo "  make shared-cpu          Build CPU-only ./$(SHLIB)"
 	@echo "  make install-shared      Build ./$(SHLIB) and install it to $(LIBDIR)"
+	@echo "  make check-metal-sources Verify #embed can read every Metal source"
 	@echo "  make test                Build and run tests"
 	@echo "  make clean               Remove build outputs"
 
@@ -184,7 +206,10 @@ ds4_bench_cpu.o: ds4_bench.c ds4.h
 ds4_eval_cpu.o: ds4_eval.c ds4.h
 	$(CC) $(CFLAGS) -DDS4_NO_GPU -c -o $@ ds4_eval.c
 
-ds4_metal.o: ds4_metal.m ds4_gpu.h $(METAL_SRCS)
+check-metal-sources: ds4_metal.m ds4_gpu.h $(METAL_EMBED) $(METAL_SRCS)
+	$(CC) $(OBJCFLAGS) -fsyntax-only ds4_metal.m
+
+ds4_metal.o: ds4_metal.m ds4_gpu.h $(METAL_EMBED) $(METAL_SRCS)
 	$(CC) $(OBJCFLAGS) -c -o $@ ds4_metal.m
 
 ds4_cuda.o: ds4_cuda.cu ds4_gpu.h ds4_iq2_tables_cuda.inc
@@ -198,7 +223,7 @@ ds4_pic.o: ds4.c ds4.h ds4_gpu.h
 ds4_cpu_pic.o: ds4.c ds4.h ds4_gpu.h
 	$(CC) $(CFLAGS) -fPIC -DDS4_NO_GPU -c -o $@ ds4.c
 
-ds4_metal_pic.o: ds4_metal.m ds4_gpu.h $(METAL_SRCS)
+ds4_metal_pic.o: ds4_metal.m ds4_gpu.h $(METAL_EMBED) $(METAL_SRCS)
 	$(CC) $(OBJCFLAGS) -fPIC -c -o $@ ds4_metal.m
 
 ds4_cuda_pic.o: ds4_cuda.cu ds4_gpu.h ds4_iq2_tables_cuda.inc
