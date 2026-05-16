@@ -1,0 +1,127 @@
+name: Release
+
+# Build the libds4 FFI shared library for each supported platform and attach
+# the results to a GitHub Release. Triggered by pushing a version tag, e.g.:
+#
+#   git tag v1.2.3 && git push nm v1.2.3
+#
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write   # needed to create the Release and upload assets
+
+env:
+  # The Makefile defaults NATIVE_CPU_FLAG to -march=native / -mcpu=native,
+  # which bakes in the *CI runner's* CPU. A binary tuned that way can crash
+  # with SIGILL on an older/different CPU, so release artifacts use a portable
+  # baseline instead. Raise these if you only target newer hardware.
+  CPU_FLAG_X86: -march=x86-64-v3       # AVX2-era x86_64 baseline
+  CPU_FLAG_ARM64_MACOS: -mcpu=apple-m1 # Apple Silicon baseline
+  CPU_FLAG_ARM64_LINUX: -mcpu=neoverse-v2  # Grace / GB10 (DGX Spark)
+  # CUDA toolkit apt package suffix from NVIDIA's ubuntu2404 repo.
+  CUDA_PKG_VERSION: 12-8
+
+jobs:
+  macos-metal-arm64:
+    name: macOS Metal (arm64)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Build libds4 (Metal)
+        run: make shared NATIVE_CPU_FLAG="$CPU_FLAG_ARM64_MACOS"
+
+      - name: Package
+        run: |
+          PKG="libds4-${GITHUB_REF_NAME}-macos-arm64-metal"
+          mkdir -p "$PKG"
+          cp libds4.dylib ds4.h LICENSE "$PKG/"
+          tar -czf "$PKG.tar.gz" "$PKG"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: libds4-macos-arm64-metal
+          path: libds4-*-macos-arm64-metal.tar.gz
+
+  linux-cuda-x86_64:
+    name: Linux CUDA (x86_64)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install CUDA toolkit
+        run: |
+          wget -q https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb
+          sudo dpkg -i cuda-keyring_1.1-1_all.deb
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends "cuda-toolkit-${CUDA_PKG_VERSION}"
+
+      - name: Build libds4 (CUDA)
+        run: |
+          export PATH="/usr/local/cuda/bin:$PATH"
+          make shared NATIVE_CPU_FLAG="$CPU_FLAG_X86"
+
+      - name: Package
+        run: |
+          PKG="libds4-${GITHUB_REF_NAME}-linux-x86_64-cuda"
+          mkdir -p "$PKG"
+          cp libds4.so ds4.h LICENSE "$PKG/"
+          tar -czf "$PKG.tar.gz" "$PKG"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: libds4-linux-x86_64-cuda
+          path: libds4-*-linux-x86_64-cuda.tar.gz
+
+  linux-cuda-arm64:
+    name: Linux CUDA (arm64/sbsa)
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install CUDA toolkit
+        run: |
+          wget -q https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/sbsa/cuda-keyring_1.1-1_all.deb
+          sudo dpkg -i cuda-keyring_1.1-1_all.deb
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends "cuda-toolkit-${CUDA_PKG_VERSION}"
+
+      - name: Build libds4 (CUDA)
+        run: |
+          export PATH="/usr/local/cuda/bin:$PATH"
+          make shared NATIVE_CPU_FLAG="$CPU_FLAG_ARM64_LINUX"
+
+      - name: Package
+        run: |
+          PKG="libds4-${GITHUB_REF_NAME}-linux-arm64-cuda"
+          mkdir -p "$PKG"
+          cp libds4.so ds4.h LICENSE "$PKG/"
+          tar -czf "$PKG.tar.gz" "$PKG"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: libds4-linux-arm64-cuda
+          path: libds4-*-linux-arm64-cuda.tar.gz
+
+  release:
+    name: Publish GitHub Release
+    needs: [macos-metal-arm64, linux-cuda-x86_64, linux-cuda-arm64]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Generate checksums
+        run: |
+          cd artifacts
+          sha256sum * > SHA256SUMS
+
+      - uses: softprops/action-gh-release@v3
+        with:
+          files: artifacts/*
+          generate_release_notes: true
