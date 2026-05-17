@@ -21,8 +21,15 @@ env:
   CPU_FLAG_X86: -march=x86-64-v3       # AVX2-era x86_64 baseline
   CPU_FLAG_ARM64_MACOS: -mcpu=apple-m1 # Apple Silicon baseline
   CPU_FLAG_ARM64_LINUX: -mcpu=neoverse-v2  # Grace / GB10 (DGX Spark)
-  # CUDA toolkit apt package suffix from NVIDIA's ubuntu2404 repo.
-  CUDA_PKG_VERSION: 12-8
+  # CUDA toolkit apt package suffix from NVIDIA's ubuntu2404 repo. 13-0 is
+  # required for GB10 (sm_121); it also builds the x86_64 artifact fine.
+  CUDA_PKG_VERSION: 13-0
+  # Virtual GPU arch for the x86_64 CUDA build. nvcc emits forward-compatible
+  # PTX that JIT-compiles on any GPU >= this. compute_75 (Turing) is the floor
+  # that has the __dp4a intrinsic ds4_cuda.cu needs.
+  # The arm64/GB10 build deliberately omits -arch (the upstream `cuda-spark`
+  # path, "the fastest path on GB10") and relies on CUDA 13's modern default.
+  CUDA_ARCH: compute_75
 
 jobs:
   macos-metal-arm64:
@@ -62,7 +69,7 @@ jobs:
       - name: Build libds4 (CUDA)
         run: |
           export PATH="/usr/local/cuda/bin:$PATH"
-          make shared NATIVE_CPU_FLAG="$CPU_FLAG_X86"
+          make shared NATIVE_CPU_FLAG="$CPU_FLAG_X86" CUDA_ARCH="$CUDA_ARCH"
 
       - name: Package
         run: |
@@ -92,6 +99,7 @@ jobs:
       - name: Build libds4 (CUDA)
         run: |
           export PATH="/usr/local/cuda/bin:$PATH"
+          # GB10: omit -arch (upstream `cuda-spark` path), CUDA 13's default suffices.
           make shared NATIVE_CPU_FLAG="$CPU_FLAG_ARM64_LINUX"
 
       - name: Package
