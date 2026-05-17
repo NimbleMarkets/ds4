@@ -11,7 +11,7 @@ on:
       - 'v*'
 
 permissions:
-  contents: write   # needed to create the Release and upload assets
+  contents: read   # build jobs only read the repo; the release job elevates
 
 env:
   # The Makefile defaults NATIVE_CPU_FLAG to -march=native / -mcpu=native,
@@ -118,6 +118,10 @@ jobs:
     name: Publish GitHub Release
     needs: [macos-metal-arm64, linux-cuda-x86_64, linux-cuda-arm64]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write       # create the Release and upload assets
+      id-token: write       # OIDC identity for Sigstore signing
+      attestations: write   # record build provenance attestations
     steps:
       - uses: actions/download-artifact@v8
         with:
@@ -128,6 +132,14 @@ jobs:
         run: |
           cd artifacts
           sha256sum * > SHA256SUMS
+
+      # Sign Sigstore build-provenance attestations for each shared library
+      # archive. Consumers verify with:
+      #   gh attestation verify <file> --repo ${{ github.repository }}
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: artifacts/libds4-*.tar.gz
 
       - uses: softprops/action-gh-release@v3
         with:
