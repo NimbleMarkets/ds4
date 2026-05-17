@@ -13,6 +13,14 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # Virtual GPU arch for the x86_64 CUDA build. nvcc emits forward-compatible
+  # PTX that JIT-compiles on any GPU >= this. compute_75 (Turing) is the floor
+  # that has the __dp4a intrinsic ds4_cuda.cu needs.
+  # The arm64/GB10 build deliberately omits -arch (the upstream `cuda-spark`
+  # path, "the fastest path on GB10") and relies on CUDA 13's modern default.
+  CUDA_ARCH: compute_75
+
 jobs:
   macos-metal:
     name: macOS Metal (arm64)
@@ -38,11 +46,11 @@ jobs:
           wget -q https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb
           sudo dpkg -i cuda-keyring_1.1-1_all.deb
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends cuda-toolkit-12-8
+          sudo apt-get install -y --no-install-recommends cuda-toolkit-13-0
       - name: Build shared library (CUDA)
         run: |
           export PATH="/usr/local/cuda/bin:$PATH"
-          make shared
+          make shared CUDA_ARCH="$CUDA_ARCH"
       - name: Build CPU-only variant
         run: |
           make clean
@@ -53,16 +61,17 @@ jobs:
     name: Linux CUDA (arm64/sbsa)
     runs-on: ubuntu-24.04-arm
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Install CUDA toolkit
         run: |
           wget -q https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/sbsa/cuda-keyring_1.1-1_all.deb
           sudo dpkg -i cuda-keyring_1.1-1_all.deb
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends cuda-toolkit-12-8
+          sudo apt-get install -y --no-install-recommends cuda-toolkit-13-0
       - name: Build shared library (CUDA)
         run: |
           export PATH="/usr/local/cuda/bin:$PATH"
+          # GB10: omit -arch (upstream `cuda-spark` path), CUDA 13's default suffices.
           make shared
       - name: Build CPU-only variant
         run: |
