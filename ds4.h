@@ -38,6 +38,13 @@ typedef enum {
     DS4_LOG_ERROR,
 } ds4_log_type;
 
+/* Streaming diagnostics hook.  `msg` is one complete log line: NUL-terminated,
+ * including the trailing newline and the "ds4: " prefix.  It is owned by the
+ * engine for the duration of the call only — copy it if you need to keep it.
+ * May be invoked concurrently from engine worker threads; any synchronization
+ * is the callback's responsibility. */
+typedef void (*ds4_log_fn)(void *ud, ds4_log_type type, const char *msg);
+
 typedef struct {
     int *v;
     int len;
@@ -114,8 +121,15 @@ ds4_think_mode ds4_think_mode_for_context(ds4_think_mode mode, int ctx_size);
 /* Uses the active model shape selected by ds4_engine_open(); call after opening
  * the GGUF so Flash/Pro dimensions are known. */
 ds4_context_memory ds4_context_memory_estimate(ds4_backend backend, int ctx_size);
+
 bool ds4_log_is_tty(FILE *fp);
 void ds4_log(FILE *fp, ds4_log_type type, const char *fmt, ...);
+/* Redirect all engine diagnostics to `fn`.  Pass fn=NULL to restore the
+ * default logger (write to stderr with TTY colorization); the default is the
+ * ground state and is never "lost", so NULL is always a valid reset.
+ * `ud` is passed back to `fn` untouched and must outlive any engine that may log. */
+void ds4_log_set(ds4_log_fn fn, void *ud);
+
 int ds4_engine_generate_argmax(ds4_engine *e, const ds4_tokens *prompt,
                                int n_predict, int ctx_size,
                                ds4_token_emit_fn emit,

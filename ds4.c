@@ -758,11 +758,52 @@ bool ds4_log_is_tty(FILE *fp) {
     return fd >= 0 && isatty(fd) != 0;
 }
 
-static void ds4_vlog(FILE *fp, ds4_log_type type, const char *fmt, va_list ap) {
+/* Process-global diagnostics hook, installed via ds4_log_set().  ds4_log() has
+ * no engine handle, so the callback is global (the llama_log_set convention).
+ * NULL is the ground state and selects the default callback below. */
+static ds4_log_fn g_log_fn;
+static void *g_log_ud;
+
+void ds4_log_set(ds4_log_fn fn, void *ud) {
+    g_log_fn = fn;
+    g_log_ud = ud;
+}
+
+/* Default callback: the historical behavior.  Writes the formatted line to the
+ * FILE * passed as user data (stderr for every engine call) with TTY-detected
+ * ANSI colorization.  The color code wraps the whole line, reset last. */
+static void ds4_default_log_cb(void *ud, ds4_log_type type, const char *msg) {
+    FILE *fp = ud ? (FILE *)ud : stderr;
     const bool colorize = type != DS4_LOG_DEFAULT && ds4_log_is_tty(fp);
     if (colorize) fputs(ds4_log_color_code(type), fp);
-    vfprintf(fp, fmt, ap);
+    fputs(msg, fp);
     if (colorize) fputs("\x1b[0m", fp);
+}
+
+static void ds4_vlog(FILE *fp, ds4_log_type type, const char *fmt, va_list ap) {
+    /* Format once into a complete line, then hand that single string to the
+     * callback.  The fast path fits in the stack buffer; only pathologically
+     * long messages take the heap branch. */
+    char buf[1024];
+    va_list ap2;
+    va_copy(ap2, ap);
+    int n = vsnprintf(buf, sizeof(buf), fmt, ap2);
+    va_end(ap2);
+
+    char *heap = NULL;
+    const char *msg = buf;
+    if (n >= (int)sizeof(buf)) {
+        heap = malloc((size_t)n + 1);
+        if (heap) {
+            vsnprintf(heap, (size_t)n + 1, fmt, ap);
+            msg = heap;
+        }
+    }
+
+    if (g_log_fn) g_log_fn(g_log_ud, type, msg);
+    else          ds4_default_log_cb(fp, type, msg);
+
+    free(heap);
 }
 
 void ds4_log(FILE *fp, ds4_log_type type, const char *fmt, ...) {
