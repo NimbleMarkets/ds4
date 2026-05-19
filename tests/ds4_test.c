@@ -652,6 +652,50 @@ static void test_server_unit_group(void) {
     ds4_server_unit_tests_run();
 }
 
+/* ---- log callback routing ------------------------------------------- */
+
+static int test_log_calls;
+static ds4_log_type test_log_last_type;
+static char test_log_last_msg[4096];
+
+static void test_log_capture(void *ud, ds4_log_type type, const char *msg) {
+    int *counter = ud;
+    if (counter) (*counter)++;
+    test_log_calls++;
+    test_log_last_type = type;
+    snprintf(test_log_last_msg, sizeof(test_log_last_msg), "%s", msg);
+}
+
+static void test_log_callback(void) {
+    int local_counter = 0;
+    test_log_calls = 0;
+    test_log_last_msg[0] = '\0';
+
+    /* An installed callback receives the fully formatted line, the type, and
+     * the user data pointer untouched. */
+    ds4_log_set(test_log_capture, &local_counter);
+    ds4_log(stderr, DS4_LOG_ERROR, "ds4: %s=%d\n", "answer", 42);
+    TEST_ASSERT(test_log_calls == 1);
+    TEST_ASSERT(local_counter == 1);
+    TEST_ASSERT(test_log_last_type == DS4_LOG_ERROR);
+    TEST_ASSERT(!strcmp(test_log_last_msg, "ds4: answer=42\n"));
+
+    /* Messages longer than ds4_vlog's stack buffer take the heap branch and
+     * must still arrive intact and untruncated. */
+    char big[2048];
+    memset(big, 'a', sizeof(big) - 1);
+    big[sizeof(big) - 1] = '\0';
+    ds4_log(stderr, DS4_LOG_DEFAULT, "%s", big);
+    TEST_ASSERT(test_log_calls == 2);
+    TEST_ASSERT(strlen(test_log_last_msg) == sizeof(big) - 1);
+    TEST_ASSERT(!strcmp(test_log_last_msg, big));
+
+    /* NULL restores the default ground state: our callback stops firing. */
+    ds4_log_set(NULL, NULL);
+    ds4_log(stderr, DS4_LOG_DEFAULT, "ds4: log-callback test restored default\n");
+    TEST_ASSERT(test_log_calls == 2);
+}
+
 typedef void (*test_fn)(void);
 
 typedef struct {
@@ -669,6 +713,7 @@ static const ds4_test_entry test_entries[] = {
     {"--metal-kernels", "metal-kernels", "isolated Metal kernel numeric regressions", test_metal_f16_matvec_fast_nr0_4},
 #endif
     {"--server", "server", "server parser/rendering/cache unit tests", test_server_unit_group},
+    {"--log-callback", "log-callback", "ds4_log_set routing, heap branch, and reset", test_log_callback},
 };
 
 static void test_print_help(const char *prog) {
