@@ -1433,6 +1433,64 @@ static void test_log_callback(void) {
     TEST_ASSERT(test_log_calls == 2);
 }
 
+/* ---- engine open error boundary ------------------------------------- */
+
+/* ds4_engine_open() used to call exit() on a bad path or malformed GGUF, which
+ * would terminate the host process — and the test process — outright.  These
+ * assertions can only execute if every load failure now propagates back as a
+ * return code and an installed log callback receives the message. */
+static void test_error_boundary(void) {
+    /* Use a dedicated lock path so a concurrent ds4 process holding the
+     * default lock can't shadow the bad-path failure we want to observe. */
+    setenv("DS4_LOCK_FILE", "/tmp/ds4-test-error-boundary.lock", 1);
+
+    /* 1. Missing model file with a callback installed. */
+    test_log_calls = 0;
+    test_log_last_msg[0] = '\0';
+    ds4_log_set(test_log_capture, NULL);
+
+    ds4_engine *engine = NULL;
+    ds4_engine_options opt = {
+        .model_path = "tests/this-model-does-not-exist.gguf",
+        .backend = DS4_BACKEND_CPU,
+    };
+    int rc = ds4_engine_open(&engine, &opt);
+    TEST_ASSERT(rc != 0);
+    TEST_ASSERT(engine == NULL);
+    TEST_ASSERT(test_log_calls > 0);
+    TEST_ASSERT(test_log_last_type == DS4_LOG_ERROR);
+    TEST_ASSERT(strstr(test_log_last_msg, "cannot open model") != NULL);
+
+    /* 2. Malformed GGUF: large enough to pass the size floor, bad magic. */
+    const char *bad_path = "/tmp/ds4-test-malformed.gguf";
+    FILE *fp = fopen(bad_path, "wb");
+    TEST_ASSERT(fp != NULL);
+    static const unsigned char zeros[64] = {0};
+    TEST_ASSERT(fwrite(zeros, 1, sizeof(zeros), fp) == sizeof(zeros));
+    TEST_ASSERT(fclose(fp) == 0);
+
+    test_log_calls = 0;
+    test_log_last_msg[0] = '\0';
+    engine = NULL;
+    opt.model_path = bad_path;
+    rc = ds4_engine_open(&engine, &opt);
+    remove(bad_path);
+    TEST_ASSERT(rc != 0);
+    TEST_ASSERT(engine == NULL);
+    TEST_ASSERT(test_log_calls > 0);
+    TEST_ASSERT(test_log_last_type == DS4_LOG_ERROR);
+    TEST_ASSERT(strstr(test_log_last_msg, "GGUF") != NULL);
+
+    /* 3. Default callback path: no callback installed, the engine still
+     *    returns instead of exiting.  Reaching this assertion is the proof. */
+    ds4_log_set(NULL, NULL);
+    engine = NULL;
+    opt.model_path = "tests/this-model-does-not-exist.gguf";
+    rc = ds4_engine_open(&engine, &opt);
+    TEST_ASSERT(rc != 0);
+    TEST_ASSERT(engine == NULL);
+}
+
 typedef void (*test_fn)(void);
 
 typedef struct {
@@ -1453,6 +1511,7 @@ static const ds4_test_entry test_entries[] = {
 #endif
     {"--server", "server", "server parser/rendering/cache unit tests", test_server_unit_group},
     {"--log-callback", "log-callback", "ds4_log_set routing, heap branch, and reset", test_log_callback},
+    {"--error-boundary", "error-boundary", "ds4_engine_open returns errors instead of exiting", test_error_boundary},
 };
 
 static void test_print_help(const char *prog) {
