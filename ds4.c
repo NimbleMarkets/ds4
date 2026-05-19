@@ -816,6 +816,31 @@ void ds4_log(FILE *fp, ds4_log_type type, const char *fmt, ...) {
     va_end(ap);
 }
 
+/* Fatal load error.  Writes the message into the caller's err/errlen out-param
+ * (the convention already used across the session API) and emits the identical
+ * text through the log callback at DS4_LOG_ERROR, so a structured return value
+ * and the log stream never diverge.  Always returns false so callers can write
+ *     if (bad) return ds4_fail(err, errlen, "thing is wrong: %s", detail);
+ *
+ * Reserved for user-reachable load failures (bad paths, malformed GGUF, missing
+ * metadata).  Internal-invariant violations still use ds4_die(). */
+static bool ds4_fail(char *err, size_t errlen, const char *fmt, ...) {
+    char buf[512];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+    if (err && errlen) snprintf(err, errlen, "%s", buf);
+    ds4_log(stderr, DS4_LOG_ERROR, "ds4: %s\n", buf);
+    return false;
+}
+
+/* As ds4_fail, for a failed syscall against a path. */
+static bool ds4_fail_errno(char *err, size_t errlen, const char *what,
+                           const char *path) {
+    return ds4_fail(err, errlen, "%s '%s': %s", what, path, strerror(errno));
+}
+
 static bool write_f32_binary_file(const char *path, const float *data, uint64_t n) {
     FILE *fp = fopen(path, "wb");
     if (!fp) {
