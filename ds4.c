@@ -17848,15 +17848,14 @@ static void ds4_release_instance_lock(void) {
 
 /* Refuse to start a second ds4 process.  The model can map tens of GiB, so a
  * stale accidental second run is more dangerous than a normal CLI error. */
-static void ds4_acquire_instance_lock(void) {
+static bool ds4_acquire_instance_lock(char *err, size_t errlen) {
     const char *path = getenv("DS4_LOCK_FILE");
     if (!path || !path[0]) path = "/tmp/ds4.lock";
 
     const int fd = open(path, O_RDWR | O_CREAT, 0600);
-    if (fd < 0) {
-        fprintf(stderr, "ds4: failed to open lock file %s: %s\n", path, strerror(errno));
-        exit(2);
-    }
+    if (fd < 0)
+        return ds4_fail(err, errlen, "failed to open lock file %s: %s",
+                        path, strerror(errno));
     (void)fcntl(fd, F_SETFD, FD_CLOEXEC);
 
     if (flock(fd, LOCK_EX | LOCK_NB) != 0) {
@@ -17869,27 +17868,28 @@ static void ds4_acquire_instance_lock(void) {
                 char *end = NULL;
                 owner = strtol(buf, &end, 10);
             }
-            if (owner > 0) {
-                fprintf(stderr, "ds4: another ds4 process is already running (pid %ld); refusing to start\n", owner);
-            } else {
-                fprintf(stderr, "ds4: another ds4 process is already running; refusing to start\n");
-            }
             close(fd);
-            exit(2);
+            if (owner > 0)
+                return ds4_fail(err, errlen,
+                                "another ds4 process is already running (pid %ld); refusing to start",
+                                owner);
+            return ds4_fail(err, errlen,
+                            "another ds4 process is already running; refusing to start");
         }
-        fprintf(stderr, "ds4: failed to lock %s: %s\n", path, strerror(errno));
+        ds4_fail(err, errlen, "failed to lock %s: %s", path, strerror(errno));
         close(fd);
-        exit(2);
+        return false;
     }
 
     if (ftruncate(fd, 0) != 0) {
-        fprintf(stderr, "ds4: failed to truncate lock file %s: %s\n", path, strerror(errno));
+        ds4_fail(err, errlen, "failed to truncate lock file %s: %s", path, strerror(errno));
         close(fd);
-        exit(2);
+        return false;
     }
     dprintf(fd, "%ld\n", (long)getpid());
     g_ds4_lock_fd = fd;
     atexit(ds4_release_instance_lock);
+    return true;
 }
 
 struct ds4_session {
@@ -20113,7 +20113,11 @@ int ds4_engine_open(ds4_engine **out, const ds4_engine_options *opt) {
         e->directional_steering_ffn_scale = opt->directional_steering_ffn;
     }
     if (opt->n_threads > 0) g_requested_threads = (uint32_t)opt->n_threads;
-    ds4_acquire_instance_lock();
+    if (!ds4_acquire_instance_lock(NULL, 0)) {
+        ds4_engine_close(e);
+        *out = NULL;
+        return 1;
+    }
 
     bool load_slice = opt->load_slice;
     uint32_t load_layer_start = opt->load_layer_start;
