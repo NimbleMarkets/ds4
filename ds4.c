@@ -14851,17 +14851,22 @@ static void bpe_tokenize_text(const ds4_vocab *vocab, const char *text, token_ve
     }
 }
 
-static int vocab_lookup(const ds4_vocab *vocab, const char *text) {
+static void vocab_free(ds4_vocab *vocab);
+
+static bool vocab_lookup(const ds4_vocab *vocab, const char *text, int *out,
+                         char *err, size_t errlen) {
     int token = -1;
-    if (!table_get(&vocab->token_to_id, text, strlen(text), &token)) {
-        fprintf(stderr, "ds4: required tokenizer token is missing: %s\n", text);
-        exit(1);
-    }
-    return token;
+    if (!table_get(&vocab->token_to_id, text, strlen(text), &token))
+        return ds4_fail(err, errlen, "required tokenizer token is missing: %s", text);
+    *out = token;
+    return true;
 }
 
-/* Load token strings, special token ids, and merge ranks from GGUF metadata. */
-static void vocab_load(ds4_vocab *vocab, const ds4_model *model) {
+/* Load token strings, special token ids, and merge ranks from GGUF metadata.
+ * Self-cleaning: any failure runs vocab_free() and returns false, so the
+ * caller is always handed a clean, zeroed vocab. */
+static bool vocab_load(ds4_vocab *vocab, const ds4_model *model,
+                       char *err, size_t errlen) {
     memset(vocab, 0, sizeof(*vocab));
 
     ds4_array_ref tokens;
@@ -14869,11 +14874,11 @@ static void vocab_load(ds4_vocab *vocab, const ds4_model *model) {
     if (!model_get_array(model, "tokenizer.ggml.tokens", &tokens) ||
         tokens.type != GGUF_VALUE_STRING ||
         tokens.len > INT32_MAX) {
-        ds4_die("GGUF tokenizer token table is missing or invalid");
+        return ds4_fail(err, errlen, "GGUF tokenizer token table is missing or invalid");
     }
     if (!model_get_array(model, "tokenizer.ggml.merges", &merges) ||
         merges.type != GGUF_VALUE_STRING) {
-        ds4_die("GGUF tokenizer merge table is missing or invalid");
+        return ds4_fail(err, errlen, "GGUF tokenizer merge table is missing or invalid");
     }
 
     vocab->n_vocab = (int)tokens.len;
@@ -14882,7 +14887,10 @@ static void vocab_load(ds4_vocab *vocab, const ds4_model *model) {
 
     ds4_cursor c = cursor_at(model, tokens.data_pos);
     for (int i = 0; i < vocab->n_vocab; i++) {
-        if (!cursor_string(&c, &vocab->token[i])) ds4_die(c.error);
+        if (!cursor_string(&c, &vocab->token[i])) {
+            vocab_free(vocab);
+            return ds4_fail(err, errlen, "%s", c.error);
+        }
         table_put(&vocab->token_to_id, vocab->token[i], i);
     }
 
@@ -14890,17 +14898,24 @@ static void vocab_load(ds4_vocab *vocab, const ds4_model *model) {
     c = cursor_at(model, merges.data_pos);
     for (uint64_t i = 0; i < merges.len; i++) {
         ds4_str merge;
-        if (!cursor_string(&c, &merge)) ds4_die(c.error);
+        if (!cursor_string(&c, &merge)) {
+            vocab_free(vocab);
+            return ds4_fail(err, errlen, "%s", c.error);
+        }
         table_put(&vocab->merge_rank, merge, (int)i);
     }
 
-    vocab->bos_id       = vocab_lookup(vocab, "<｜begin▁of▁sentence｜>");
-    vocab->eos_id       = vocab_lookup(vocab, "<｜end▁of▁sentence｜>");
-    vocab->user_id      = vocab_lookup(vocab, "<｜User｜>");
-    vocab->assistant_id = vocab_lookup(vocab, "<｜Assistant｜>");
-    vocab->think_start_id = vocab_lookup(vocab, "<think>");
-    vocab->think_end_id = vocab_lookup(vocab, "</think>");
-    vocab->dsml_id = vocab_lookup(vocab, "｜DSML｜");
+    if (!vocab_lookup(vocab, "<｜begin▁of▁sentence｜>", &vocab->bos_id, err, errlen) ||
+        !vocab_lookup(vocab, "<｜end▁of▁sentence｜>", &vocab->eos_id, err, errlen) ||
+        !vocab_lookup(vocab, "<｜User｜>", &vocab->user_id, err, errlen) ||
+        !vocab_lookup(vocab, "<｜Assistant｜>", &vocab->assistant_id, err, errlen) ||
+        !vocab_lookup(vocab, "<think>", &vocab->think_start_id, err, errlen) ||
+        !vocab_lookup(vocab, "</think>", &vocab->think_end_id, err, errlen) ||
+        !vocab_lookup(vocab, "｜DSML｜", &vocab->dsml_id, err, errlen)) {
+        vocab_free(vocab);
+        return false;
+    }
+    return true;
 }
 
 static void vocab_free(ds4_vocab *vocab) {
@@ -16811,7 +16826,10 @@ int ds4_dump_text_tokenization(const char *model_path, const char *text, FILE *f
     if (!fp) fp = stdout;
     if (!model_open(&model, model_path, false, false, NULL, 0))
         return 1;
-    vocab_load(&vocab, &model);
+    if (!vocab_load(&vocab, &model, NULL, 0)) {
+        model_close(&model);
+        return 1;
+    }
     tokenize_rendered_chat_vocab(&vocab, text ? text : "", &tokens);
 
     dump_tokens_fp(fp, &vocab, &tokens);
@@ -17270,7 +17288,11 @@ int ds4_engine_open(ds4_engine **out, const ds4_engine_options *opt) {
         return 1;
     }
     if (opt->warm_weights) model_warm_weights(&e->model);
-    vocab_load(&e->vocab, &e->model);
+    if (!vocab_load(&e->vocab, &e->model, NULL, 0)) {
+        ds4_engine_close(e);
+        *out = NULL;
+        return 1;
+    }
     config_validate_model(&e->model);
     weights_bind(&e->weights, &e->model);
     if (e->backend == DS4_BACKEND_CPU && !cpu_load_directional_steering(e)) {
