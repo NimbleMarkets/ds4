@@ -2662,123 +2662,121 @@ typedef struct {
  * lookup.  Shape validation is intentionally strict.
  */
 
-static uint32_t required_u32(const ds4_model *m, const char *key) {
-    uint32_t v = 0;
-    if (!model_get_u32(m, key, &v)) {
-        fprintf(stderr, "ds4: required metadata key is missing: %s\n", key);
-        exit(1);
-    }
-    return v;
+static bool required_u32(const ds4_model *m, const char *key, uint32_t *out,
+                         char *err, size_t errlen) {
+    if (!model_get_u32(m, key, out))
+        return ds4_fail(err, errlen, "required metadata key is missing: %s", key);
+    return true;
 }
 
-static float required_f32(const ds4_model *m, const char *key) {
-    float v = 0.0f;
-    if (!model_get_f32_compat(m, key, &v)) {
-        fprintf(stderr, "ds4: required metadata key is missing: %s\n", key);
-        exit(1);
-    }
-    return v;
+static bool required_f32(const ds4_model *m, const char *key) {
 }
 
-static bool required_bool(const ds4_model *m, const char *key) {
-    bool v = false;
-    if (!model_get_bool(m, key, &v)) {
-        fprintf(stderr, "ds4: required metadata key is missing: %s\n", key);
-        exit(1);
-    }
-    return v;
+static bool required_bool(const ds4_model *m, const char *key, bool *out,
+                          char *err, size_t errlen) {
+    if (!model_get_bool(m, key, out))
+        return ds4_fail(err, errlen, "required metadata key is missing: %s", key);
+    return true;
 }
 
-static ds4_tensor *required_tensor(const ds4_model *m, const char *name) {
+static bool required_tensor(const ds4_model *m, const char *name,
+                            ds4_tensor **out, char *err, size_t errlen) {
     ds4_tensor *t = model_find_tensor(m, name);
-    if (!t) {
-        fprintf(stderr, "ds4: required tensor is missing: %s\n", name);
-        exit(1);
-    }
-    return t;
+    if (!t) return ds4_fail(err, errlen, "required tensor is missing: %s", name);
+    *out = t;
+    return true;
 }
 
-static ds4_tensor *tensor_by_namef(const ds4_model *m, const char *fmt, uint32_t layer) {
+/* Optional layer tensor lookup: *out may come back NULL.  Only a name that
+ * overflows the format buffer is a hard failure. */
+static bool tensor_by_namef(const ds4_model *m, const char *fmt, uint32_t layer,
+                            ds4_tensor **out, char *err, size_t errlen) {
     char name[128];
     int n = snprintf(name, sizeof(name), fmt, layer);
-    if (n < 0 || (size_t)n >= sizeof(name)) ds4_die("tensor name is too long");
-    return model_find_tensor(m, name);
+    if (n < 0 || (size_t)n >= sizeof(name)) return ds4_fail(err, errlen, "tensor name is too long");
+    *out = model_find_tensor(m, name);
+    return true;
 }
 
-static ds4_tensor *required_tensorf(const ds4_model *m, const char *fmt, uint32_t layer) {
+static bool required_tensorf(const ds4_model *m, const char *fmt, uint32_t layer,
+                             ds4_tensor **out, char *err, size_t errlen) {
     char name[128];
     int n = snprintf(name, sizeof(name), fmt, layer);
-    if (n < 0 || (size_t)n >= sizeof(name)) ds4_die("tensor name is too long");
-    return required_tensor(m, name);
+    if (n < 0 || (size_t)n >= sizeof(name))
+        return ds4_fail(err, errlen, "tensor name is too long");
+    return required_tensor(m, name, out, err, errlen);
 }
 
-static void tensor_expect_layout(
+static bool tensor_expect_layout(
         const ds4_tensor *t,
         uint32_t          type,
         uint32_t          ndim,
         uint64_t          d0,
         uint64_t          d1,
-        uint64_t          d2) {
-    if (!t) ds4_die("internal error: missing tensor while validating layout");
-    if (t->type != type) {
-        fprintf(stderr,
-                "ds4: tensor %.*s has type %s, expected %s\n",
-                (int)t->name.len,
-                t->name.ptr,
-                tensor_type_name(t->type),
-                tensor_type_name(type));
-        exit(1);
-    }
-    if (t->ndim != ndim) {
-        fprintf(stderr,
-                "ds4: tensor %.*s has %u dimensions, expected %u\n",
-                (int)t->name.len,
-                t->name.ptr,
-                t->ndim,
-                ndim);
-        exit(1);
-    }
+        uint64_t          d2,
+        char             *err,
+        size_t            errlen) {
+    if (!t)
+        return ds4_fail(err, errlen, "internal error: missing tensor while validating layout");
+    if (t->type != type)
+        return ds4_fail(err, errlen,
+                        "tensor %.*s has type %s, expected %s",
+                        (int)t->name.len,
+                        t->name.ptr,
+                        tensor_type_name(t->type),
+                        tensor_type_name(type));
+    if (t->ndim != ndim)
+        return ds4_fail(err, errlen,
+                        "tensor %.*s has %u dimensions, expected %u",
+                        (int)t->name.len,
+                        t->name.ptr,
+                        t->ndim,
+                        ndim);
 
     const uint64_t want[3] = { d0, d1, d2 };
     for (uint32_t i = 0; i < ndim; i++) {
         if (t->dim[i] == want[i]) continue;
-        fprintf(stderr,
-                "ds4: tensor %.*s has dim[%u]=%" PRIu64 ", expected %" PRIu64 "\n",
-                (int)t->name.len,
-                t->name.ptr,
-                i,
-                t->dim[i],
-                want[i]);
-        exit(1);
+        return ds4_fail(err, errlen,
+                        "tensor %.*s has dim[%u]=%" PRIu64 ", expected %" PRIu64,
+                        (int)t->name.len,
+                        t->name.ptr,
+                        i,
+                        t->dim[i],
+                        want[i]);
     }
+    return true;
 }
 
-static void tensor_expect_optional(
+static bool tensor_expect_optional(
         const ds4_tensor *t,
         uint32_t          type,
         uint32_t          ndim,
         uint64_t          d0,
         uint64_t          d1,
-        uint64_t          d2) {
-    if (t) tensor_expect_layout(t, type, ndim, d0, d1, d2);
+        uint64_t          d2,
+        char             *err,
+        size_t            errlen) {
+    if (!t) return true;
+    return tensor_expect_layout(t, type, ndim, d0, d1, d2, err, errlen);
 }
 
-static void tensor_expect_plain_layout(
+static bool tensor_expect_plain_layout(
         const ds4_tensor *t,
         uint32_t          ndim,
         uint64_t          d0,
         uint64_t          d1,
-        uint64_t          d2) {
-    if (!t) ds4_die("internal error: missing tensor while validating layout");
-    if (t->type != DS4_TENSOR_F16 && t->type != DS4_TENSOR_F32) {
-        fprintf(stderr,
-                "ds4: tensor %.*s has type %s, expected F16 or F32\n",
-                (int)t->name.len,
-                t->name.ptr,
-                tensor_type_name(t->type));
-        exit(1);
-    }
-    tensor_expect_layout(t, t->type, ndim, d0, d1, d2);
+        uint64_t          d2,
+        char             *err,
+        size_t            errlen) {
+    if (!t)
+        return ds4_fail(err, errlen, "internal error: missing tensor while validating layout");
+    if (t->type != DS4_TENSOR_F16 && t->type != DS4_TENSOR_F32)
+        return ds4_fail(err, errlen,
+                        "tensor %.*s has type %s, expected F16 or F32",
+                        (int)t->name.len,
+                        t->name.ptr,
+                        tensor_type_name(t->type));
+    return tensor_expect_layout(t, t->type, ndim, d0, d1, d2, err, errlen);
 }
 
 static bool tensor_type_is_f16_or_q8_0(uint32_t type) {
@@ -2824,7 +2822,7 @@ static DS4_MAYBE_UNUSED uint64_t routed_expert_row_bytes(const ds4_tensor *t) {
     return (t->dim[0] / QK_K) * routed_expert_block_bytes(t->type);
 }
 
-static void tensor_expect_routed_expert(
+static bool tensor_expect_routed_expert(
         const ds4_tensor *t,
         uint32_t          ndim,
         uint64_t          d0,
@@ -2832,36 +2830,33 @@ static void tensor_expect_routed_expert(
         uint64_t          d2) {
     if (!t) ds4_die("internal error: missing routed expert tensor while validating layout");
     if (!tensor_is_routed_expert_type(t->type)) {
-        fprintf(stderr,
+        return ds4_fail(err, errlen,
                 "ds4: tensor %.*s has type %u (%s), expected a routed expert quant type\n",
                 (int)t->name.len,
                 t->name.ptr,
                 t->type,
                 tensor_type_name(t->type));
-        exit(1);
     }
     if (t->ndim != ndim) {
-        fprintf(stderr,
-                "ds4: tensor %.*s has %u dimensions, expected %u\n",
+        return ds4_fail(err, errlen, "tensor %.*s has %u dimensions, expected %u",
                 (int)t->name.len,
                 t->name.ptr,
                 t->ndim,
                 ndim);
-        exit(1);
     }
 
     const uint64_t want[3] = { d0, d1, d2 };
     for (uint32_t i = 0; i < ndim; i++) {
         if (t->dim[i] == want[i]) continue;
-        fprintf(stderr,
-                "ds4: tensor %.*s has dim[%u]=%" PRIu64 ", expected %" PRIu64 "\n",
-                (int)t->name.len,
-                t->name.ptr,
-                i,
-                t->dim[i],
-                want[i]);
-        exit(1);
+        return ds4_fail(err, errlen,
+                        "tensor %.*s has dim[%u]=%" PRIu64 ", expected %" PRIu64,
+                        (int)t->name.len,
+                        t->name.ptr,
+                        i,
+                        t->dim[i],
+                        want[i]);
     }
+    return true;
 }
 
 static bool weights_have_output_head(const ds4_weights *w) {
@@ -2960,7 +2955,8 @@ static void weights_validate_layout(
         uint32_t           layer_start,
         uint32_t           layer_end,
         bool               require_token_embd,
-        bool               require_output) {
+        bool               require_output,
+        char *err, size_t errlen) {
     const uint64_t hc_dim = (uint64_t)DS4_N_EMBD * DS4_N_HC;
     const uint64_t hc_mix_dim = 2u * DS4_N_HC + (uint64_t)DS4_N_HC * DS4_N_HC;
     const uint64_t q_dim = (uint64_t)DS4_N_HEAD * DS4_N_HEAD_DIM;
@@ -2971,6 +2967,15 @@ static void weights_validate_layout(
     if (layer_end == UINT32_MAX) layer_end = DS4_N_LAYER - 1u;
     if (layer_end >= DS4_N_LAYER || layer_end < layer_start) {
         ds4_die("invalid layer range in weight layout validation");
+    }
+    
+    if (!tensor_expect_layout(w->token_embd,      DS4_TENSOR_F16,  2, DS4_N_EMBD, DS4_N_VOCAB, 0, err, errlen) ||
+        !tensor_expect_layout(w->output_hc_base,  DS4_TENSOR_F32,  1, DS4_N_HC, 0, 0, err, errlen) ||
+        !tensor_expect_layout(w->output_hc_fn,    DS4_TENSOR_F16,  2, hc_dim, DS4_N_HC, 0, err, errlen) ||
+        !tensor_expect_layout(w->output_hc_scale, DS4_TENSOR_F32,  1, 1, 0, 0, err, errlen) ||
+        !tensor_expect_layout(w->output_norm,     DS4_TENSOR_F32,  1, DS4_N_EMBD, 0, 0, err, errlen) ||
+        !tensor_expect_layout(w->output,          DS4_TENSOR_Q8_0, 2, DS4_N_EMBD, DS4_N_VOCAB, 0, err, errlen)) {
+        return false;
     }
 
     if (require_token_embd && !w->token_embd) ds4_die("required token embedding tensor is missing");
@@ -2997,104 +3002,124 @@ static void weights_validate_layout(
             exit(1);
         }
 
-        tensor_expect_layout(l->hc_attn_fn,     DS4_TENSOR_F16,  2, hc_dim, hc_mix_dim, 0);
-        tensor_expect_layout(l->hc_attn_scale,  DS4_TENSOR_F32,  1, 3, 0, 0);
-        tensor_expect_layout(l->hc_attn_base,   DS4_TENSOR_F32,  1, hc_mix_dim, 0, 0);
-        tensor_expect_layout(l->attn_norm,      DS4_TENSOR_F32,  1, DS4_N_EMBD, 0, 0);
-        tensor_expect_layout(l->attn_q_a,       DS4_TENSOR_Q8_0, 2, DS4_N_EMBD, DS4_N_LORA_Q, 0);
-        tensor_expect_layout(l->attn_q_a_norm,  DS4_TENSOR_F32,  1, DS4_N_LORA_Q, 0, 0);
-        tensor_expect_layout(l->attn_q_b,       DS4_TENSOR_Q8_0, 2, DS4_N_LORA_Q, q_dim, 0);
-        tensor_expect_layout(l->attn_kv,        DS4_TENSOR_Q8_0, 2, DS4_N_EMBD, DS4_N_HEAD_DIM, 0);
-        tensor_expect_layout(l->attn_kv_a_norm, DS4_TENSOR_F32,  1, DS4_N_HEAD_DIM, 0, 0);
-        tensor_expect_layout(l->attn_sinks,     DS4_TENSOR_F32,  1, DS4_N_HEAD, 0, 0);
-        tensor_expect_layout(l->attn_output_a,  DS4_TENSOR_Q8_0, 2, DS4_N_HEAD_DIM * (DS4_N_HEAD / DS4_N_OUT_GROUP), out_low_dim, 0);
-        tensor_expect_layout(l->attn_output_b,  DS4_TENSOR_Q8_0, 2, out_low_dim, DS4_N_EMBD, 0);
+        if (!tensor_expect_layout(l->hc_attn_fn,     DS4_TENSOR_F16,  2, hc_dim, hc_mix_dim, 0, err, errlen) ||
+            !tensor_expect_layout(l->hc_attn_scale,  DS4_TENSOR_F32,  1, 3, 0, 0, err, errlen) ||
+            !tensor_expect_layout(l->hc_attn_base,   DS4_TENSOR_F32,  1, hc_mix_dim, 0, 0, err, errlen) ||
+            !tensor_expect_layout(l->attn_norm,      DS4_TENSOR_F32,  1, DS4_N_EMBD, 0, 0, err, errlen) ||
+            !tensor_expect_layout(l->attn_q_a,       DS4_TENSOR_Q8_0, 2, DS4_N_EMBD, DS4_N_LORA_Q, 0, err, errlen) ||
+            !tensor_expect_layout(l->attn_q_a_norm,  DS4_TENSOR_F32,  1, DS4_N_LORA_Q, 0, 0, err, errlen) ||
+            !tensor_expect_layout(l->attn_q_b,       DS4_TENSOR_Q8_0, 2, DS4_N_LORA_Q, q_dim, 0, err, errlen) ||
+            !tensor_expect_layout(l->attn_kv,        DS4_TENSOR_Q8_0, 2, DS4_N_EMBD, DS4_N_HEAD_DIM, 0, err, errlen) ||
+            !tensor_expect_layout(l->attn_kv_a_norm, DS4_TENSOR_F32,  1, DS4_N_HEAD_DIM, 0, 0, err, errlen) ||
+            !tensor_expect_layout(l->attn_sinks,     DS4_TENSOR_F32,  1, DS4_N_HEAD, 0, 0, err, errlen) ||
+            !tensor_expect_layout(l->attn_output_a,  DS4_TENSOR_Q8_0, 2, DS4_N_HEAD_DIM * (DS4_N_HEAD / DS4_N_OUT_GROUP), out_low_dim, 0, err, errlen) ||
+            !tensor_expect_layout(l->attn_output_b,  DS4_TENSOR_Q8_0, 2, out_low_dim, DS4_N_EMBD, 0, err, errlen)) {
+            return false;
+        }
 
         if (ratio != 0) {
             const uint32_t coff = ratio == 4 ? 2u : 1u;
             const uint64_t comp_width = (uint64_t)coff * DS4_N_HEAD_DIM;
-            tensor_expect_layout(l->attn_compressor_ape,  DS4_TENSOR_F16, 2, comp_width, ratio, 0);
-            tensor_expect_layout(l->attn_compressor_kv,   DS4_TENSOR_F16, 2, DS4_N_EMBD, comp_width, 0);
-            tensor_expect_layout(l->attn_compressor_gate, DS4_TENSOR_F16, 2, DS4_N_EMBD, comp_width, 0);
-            tensor_expect_layout(l->attn_compressor_norm, DS4_TENSOR_F32, 1, DS4_N_HEAD_DIM, 0, 0);
+            if (!tensor_expect_layout(l->attn_compressor_ape,  DS4_TENSOR_F16, 2, comp_width, ratio, 0, err, errlen) ||
+                !tensor_expect_layout(l->attn_compressor_kv,   DS4_TENSOR_F16, 2, DS4_N_EMBD, comp_width, 0, err, errlen) ||
+                !tensor_expect_layout(l->attn_compressor_gate, DS4_TENSOR_F16, 2, DS4_N_EMBD, comp_width, 0, err, errlen) ||
+                !tensor_expect_layout(l->attn_compressor_norm, DS4_TENSOR_F32, 1, DS4_N_HEAD_DIM, 0, 0, err, errlen)) {
+                return false;
+            }
         }
         if (ratio == 4) {
             const uint64_t index_q_dim = (uint64_t)DS4_N_INDEXER_HEAD * DS4_N_INDEXER_HEAD_DIM;
             const uint64_t index_width = 2u * DS4_N_INDEXER_HEAD_DIM;
+            if (!tensor_expect_f16_or_q8_0_layout(l->indexer_attn_q_b, 2, DSN_LORA_Q, index_q_dim, 0, err, errlen) ||
+                !tensor_expect_layout(l->indexer_proj,            DS4_TENSOR_F16, 2, DS4_N_EMBD, DS4_N_INDEXER_HEAD, 0, err, errlen) ||
+                !tensor_expect_layout(l->indexer_compressor_ape,  DS4_TENSOR_F16, 2, index_width, ratio, 0, err, errlen) ||
+                !tensor_expect_layout(l->indexer_compressor_kv,   DS4_TENSOR_F16, 2, DS4_N_EMBD, index_width, 0, err, errlen) ||
+                !tensor_expect_layout(l->indexer_compressor_gate, DS4_TENSOR_F16, 2, DS4_N_EMBD, index_width, 0, err, errlen) ||
+                !tensor_expect_layout(l->indexer_compressor_norm, DS4_TENSOR_F32, 1, DS4_N_INDEXER_HEAD_DIM, 0, 0, err, errlen)) {
+                return false;
+            }
             tensor_expect_f16_or_q8_0_layout(l->indexer_attn_q_b, 2, DS4_N_LORA_Q, index_q_dim, 0);
-            tensor_expect_layout(l->indexer_proj,              DS4_TENSOR_F16, 2, DS4_N_EMBD, DS4_N_INDEXER_HEAD, 0);
-            tensor_expect_layout(l->indexer_compressor_ape,    DS4_TENSOR_F16, 2, index_width, ratio, 0);
-            tensor_expect_layout(l->indexer_compressor_kv,     DS4_TENSOR_F16, 2, DS4_N_EMBD, index_width, 0);
-            tensor_expect_layout(l->indexer_compressor_gate,   DS4_TENSOR_F16, 2, DS4_N_EMBD, index_width, 0);
-            tensor_expect_layout(l->indexer_compressor_norm,   DS4_TENSOR_F32, 1, DS4_N_INDEXER_HEAD_DIM, 0, 0);
         }
 
-        tensor_expect_layout(l->hc_ffn_fn,      DS4_TENSOR_F16,  2, hc_dim, hc_mix_dim, 0);
-        tensor_expect_layout(l->hc_ffn_scale,   DS4_TENSOR_F32,  1, 3, 0, 0);
-        tensor_expect_layout(l->hc_ffn_base,    DS4_TENSOR_F32,  1, hc_mix_dim, 0, 0);
-        tensor_expect_layout(l->ffn_norm,       DS4_TENSOR_F32,  1, DS4_N_EMBD, 0, 0);
-        tensor_expect_layout(l->ffn_gate_inp,   DS4_TENSOR_F16,  2, DS4_N_EMBD, DS4_N_EXPERT, 0);
-        tensor_expect_optional(l->ffn_exp_probs_b, DS4_TENSOR_F32, 1, DS4_N_EXPERT, 0, 0);
-        tensor_expect_routed_expert(l->ffn_gate_exps, 3, DS4_N_EMBD, DS4_N_FF_EXP, DS4_N_EXPERT);
-        tensor_expect_routed_expert(l->ffn_up_exps,   3, DS4_N_EMBD, DS4_N_FF_EXP, DS4_N_EXPERT);
-        tensor_expect_routed_expert(l->ffn_down_exps, 3, DS4_N_FF_EXP, DS4_N_EMBD, DS4_N_EXPERT);
-        if (l->ffn_gate_exps->type != l->ffn_up_exps->type) {
-            fprintf(stderr, "ds4: routed gate/up experts use different quant types in layer %u\n", il);
-            exit(1);
+        if (!tensor_expect_layout(l->hc_ffn_fn,      DS4_TENSOR_F16,  2, hc_dim, hc_mix_dim, 0, err, errlen) ||
+            !tensor_expect_layout(l->hc_ffn_scale,   DS4_TENSOR_F32,  1, 3, 0, 0, err, errlen) ||
+            !tensor_expect_layout(l->hc_ffn_base,    DS4_TENSOR_F32,  1, hc_mix_dim, 0, 0, err, errlen) ||
+            !tensor_expect_layout(l->ffn_norm,       DS4_TENSOR_F32,  1, DS4_N_EMBD, 0, 0, err, errlen) ||
+            !tensor_expect_layout(l->ffn_gate_inp,   DS4_TENSOR_F16,  2, DS4_N_EMBD, DS4_N_EXPERT, 0, err, errlen) ||
+            !tensor_expect_optional(l->ffn_exp_probs_b, DS4_TENSOR_F32, 1, DS4_N_EXPERT, 0, 0, err, errlen) ||
+            !tensor_expect_routed_expert(l->ffn_gate_exps, 3, DS4_N_EMBD, DS4_N_FF_EXP, DS4_N_EXPERT, err, errlen) ||
+            !tensor_expect_routed_expert(l->ffn_up_exps,   3, DS4_N_EMBD, DS4_N_FF_EXP, DS4_N_EXPERT, err, errlen) ||
+            !tensor_expect_routed_expert(l->ffn_down_exps, 3, DS4_N_FF_EXP, DS4_N_EMBD, DS4_N_EXPERT, err, errlen)) {
+            return false;
         }
-        tensor_expect_layout(l->ffn_gate_shexp, DS4_TENSOR_Q8_0,    2, DS4_N_EMBD, DS4_N_FF_EXP, 0);
-        tensor_expect_layout(l->ffn_up_shexp,   DS4_TENSOR_Q8_0,    2, DS4_N_EMBD, DS4_N_FF_EXP, 0);
-        tensor_expect_layout(l->ffn_down_shexp, DS4_TENSOR_Q8_0,    2, DS4_N_FF_EXP, DS4_N_EMBD, 0);
-        if (il < DS4_N_HASH_LAYER) {
-            tensor_expect_layout(l->ffn_gate_tid2eid, DS4_TENSOR_I32, 2, DS4_N_EXPERT_USED, DS4_N_VOCAB, 0);
+        if (l->ffn_gate_exps->type != l->ffn_up_exps->type)
+            return ds4_fail(err, errlen,
+                            "routed gate/up experts use different quant types in layer %u", il);
+        if (!tensor_expect_layout(l->ffn_gate_shexp, DS4_TENSOR_Q8_0, 2, DS4_N_EMBD, DS4_N_FF_EXP, 0, err, errlen) ||
+            !tensor_expect_layout(l->ffn_up_shexp,   DS4_TENSOR_Q8_0, 2, DS4_N_EMBD, DS4_N_FF_EXP, 0, err, errlen) ||
+            !tensor_expect_layout(l->ffn_down_shexp, DS4_TENSOR_Q8_0, 2, DS4_N_FF_EXP, DS4_N_EMBD, 0, err, errlen)) {
+            return false;
+        }
+        if (il < DS4_N_HASH_LAYER &&
+            !tensor_expect_layout(l->ffn_gate_tid2eid, DS4_TENSOR_I32, 2, DS4_N_EXPERT_USED, DS4_N_VOCAB, 0, err, errlen)) {
+            return false;
         }
     }
+    return true;
 }
 
-static void mtp_weights_validate_layout(const ds4_mtp_weights *w) {
+static bool mtp_weights_validate_layout(const ds4_mtp_weights *w, char *err, size_t errlen) {
     const uint64_t hc_dim = (uint64_t)DS4_N_EMBD * DS4_N_HC;
     const uint64_t hc_mix_dim = 2u * DS4_N_HC + (uint64_t)DS4_N_HC * DS4_N_HC;
     const uint64_t q_dim = (uint64_t)DS4_N_HEAD * DS4_N_HEAD_DIM;
     const uint64_t out_low_dim = (uint64_t)DS4_N_OUT_GROUP * DS4_N_LORA_O;
     const ds4_layer_weights *l = &w->block;
 
-    tensor_expect_layout(w->hc_head_base,  DS4_TENSOR_F32,  1, DS4_N_HC, 0, 0);
-    tensor_expect_plain_layout(w->hc_head_fn, 2, hc_dim, DS4_N_HC, 0);
-    tensor_expect_layout(w->hc_head_scale, DS4_TENSOR_F32,  1, 1, 0, 0);
-    tensor_expect_layout(w->e_proj,        DS4_TENSOR_Q8_0, 2, DS4_N_EMBD, DS4_N_EMBD, 0);
-    tensor_expect_layout(w->h_proj,        DS4_TENSOR_Q8_0, 2, DS4_N_EMBD, DS4_N_EMBD, 0);
-    tensor_expect_layout(w->enorm,         DS4_TENSOR_F32,  1, DS4_N_EMBD, 0, 0);
-    tensor_expect_layout(w->hnorm,         DS4_TENSOR_F32,  1, DS4_N_EMBD, 0, 0);
-    tensor_expect_layout(w->norm,          DS4_TENSOR_F32,  1, DS4_N_EMBD, 0, 0);
-
-    tensor_expect_plain_layout(l->hc_attn_fn, 2, hc_dim, hc_mix_dim, 0);
-    tensor_expect_layout(l->hc_attn_scale,  DS4_TENSOR_F32,  1, 3, 0, 0);
-    tensor_expect_layout(l->hc_attn_base,   DS4_TENSOR_F32,  1, hc_mix_dim, 0, 0);
-    tensor_expect_layout(l->attn_norm,      DS4_TENSOR_F32,  1, DS4_N_EMBD, 0, 0);
-    tensor_expect_layout(l->attn_q_a,       DS4_TENSOR_Q8_0, 2, DS4_N_EMBD, DS4_N_LORA_Q, 0);
-    tensor_expect_layout(l->attn_q_a_norm,  DS4_TENSOR_F32,  1, DS4_N_LORA_Q, 0, 0);
-    tensor_expect_layout(l->attn_q_b,       DS4_TENSOR_Q8_0, 2, DS4_N_LORA_Q, q_dim, 0);
-    tensor_expect_layout(l->attn_kv,        DS4_TENSOR_Q8_0, 2, DS4_N_EMBD, DS4_N_HEAD_DIM, 0);
-    tensor_expect_layout(l->attn_kv_a_norm, DS4_TENSOR_F32,  1, DS4_N_HEAD_DIM, 0, 0);
-    tensor_expect_layout(l->attn_sinks,     DS4_TENSOR_F32,  1, DS4_N_HEAD, 0, 0);
-    tensor_expect_layout(l->attn_output_a,  DS4_TENSOR_Q8_0, 2, DS4_N_HEAD_DIM * (DS4_N_HEAD / DS4_N_OUT_GROUP), out_low_dim, 0);
-    tensor_expect_layout(l->attn_output_b,  DS4_TENSOR_Q8_0, 2, out_low_dim, DS4_N_EMBD, 0);
-
-    tensor_expect_plain_layout(l->hc_ffn_fn, 2, hc_dim, hc_mix_dim, 0);
-    tensor_expect_layout(l->hc_ffn_scale,   DS4_TENSOR_F32,  1, 3, 0, 0);
-    tensor_expect_layout(l->hc_ffn_base,    DS4_TENSOR_F32,  1, hc_mix_dim, 0, 0);
-    tensor_expect_layout(l->ffn_norm,       DS4_TENSOR_F32,  1, DS4_N_EMBD, 0, 0);
-    tensor_expect_plain_layout(l->ffn_gate_inp, 2, DS4_N_EMBD, DS4_N_EXPERT, 0);
-    tensor_expect_layout(l->ffn_exp_probs_b, DS4_TENSOR_F32, 1, DS4_N_EXPERT, 0, 0);
-    tensor_expect_routed_expert(l->ffn_gate_exps, 3, DS4_N_EMBD, DS4_N_FF_EXP, DS4_N_EXPERT);
-    tensor_expect_routed_expert(l->ffn_up_exps,   3, DS4_N_EMBD, DS4_N_FF_EXP, DS4_N_EXPERT);
-    tensor_expect_routed_expert(l->ffn_down_exps, 3, DS4_N_FF_EXP, DS4_N_EMBD, DS4_N_EXPERT);
-    if (l->ffn_gate_exps->type != l->ffn_up_exps->type) {
-        ds4_die("MTP routed gate/up experts use different quant types");
+    if (!tensor_expect_layout(w->hc_head_base,  DS4_TENSOR_F32,  1, DS4_N_HC, 0, 0, err, errlen) ||
+        !tensor_expect_plain_layout(w->hc_head_fn, 2, hc_dim, DS4_N_HC, 0, err, errlen) ||
+        !tensor_expect_layout(w->hc_head_scale, DS4_TENSOR_F32,  1, 1, 0, 0, err, errlen) ||
+        !tensor_expect_layout(w->e_proj,        DS4_TENSOR_Q8_0, 2, DS4_N_EMBD, DS4_N_EMBD, 0, err, errlen) ||
+        !tensor_expect_layout(w->h_proj,        DS4_TENSOR_Q8_0, 2, DS4_N_EMBD, DS4_N_EMBD, 0, err, errlen) ||
+        !tensor_expect_layout(w->enorm,         DS4_TENSOR_F32,  1, DS4_N_EMBD, 0, 0, err, errlen) ||
+        !tensor_expect_layout(w->hnorm,         DS4_TENSOR_F32,  1, DS4_N_EMBD, 0, 0, err, errlen) ||
+        !tensor_expect_layout(w->norm,          DS4_TENSOR_F32,  1, DS4_N_EMBD, 0, 0, err, errlen)) {
+        return false;
     }
-    tensor_expect_layout(l->ffn_gate_shexp, DS4_TENSOR_Q8_0, 2, DS4_N_EMBD, DS4_N_FF_EXP, 0);
-    tensor_expect_layout(l->ffn_up_shexp,   DS4_TENSOR_Q8_0, 2, DS4_N_EMBD, DS4_N_FF_EXP, 0);
-    tensor_expect_layout(l->ffn_down_shexp, DS4_TENSOR_Q8_0, 2, DS4_N_FF_EXP, DS4_N_EMBD, 0);
+
+    if (!tensor_expect_plain_layout(l->hc_attn_fn, 2, hc_dim, hc_mix_dim, 0, err, errlen) ||
+        !tensor_expect_layout(l->hc_attn_scale,  DS4_TENSOR_F32,  1, 3, 0, 0, err, errlen) ||
+        !tensor_expect_layout(l->hc_attn_base,   DS4_TENSOR_F32,  1, hc_mix_dim, 0, 0, err, errlen) ||
+        !tensor_expect_layout(l->attn_norm,      DS4_TENSOR_F32,  1, DS4_N_EMBD, 0, 0, err, errlen) ||
+        !tensor_expect_layout(l->attn_q_a,       DS4_TENSOR_Q8_0, 2, DS4_N_EMBD, DS4_N_LORA_Q, 0, err, errlen) ||
+        !tensor_expect_layout(l->attn_q_a_norm,  DS4_TENSOR_F32,  1, DS4_N_LORA_Q, 0, 0, err, errlen) ||
+        !tensor_expect_layout(l->attn_q_b,       DS4_TENSOR_Q8_0, 2, DS4_N_LORA_Q, q_dim, 0, err, errlen) ||
+        !tensor_expect_layout(l->attn_kv,        DS4_TENSOR_Q8_0, 2, DS4_N_EMBD, DS4_N_HEAD_DIM, 0, err, errlen) ||
+        !tensor_expect_layout(l->attn_kv_a_norm, DS4_TENSOR_F32,  1, DS4_N_HEAD_DIM, 0, 0, err, errlen) ||
+        !tensor_expect_layout(l->attn_sinks,     DS4_TENSOR_F32,  1, DS4_N_HEAD, 0, 0, err, errlen) ||
+        !tensor_expect_layout(l->attn_output_a,  DS4_TENSOR_Q8_0, 2, DS4_N_HEAD_DIM * (DS4_N_HEAD / DS4_N_OUT_GROUP), out_low_dim, 0, err, errlen) ||
+        !tensor_expect_layout(l->attn_output_b,  DS4_TENSOR_Q8_0, 2, out_low_dim, DS4_N_EMBD, 0, err, errlen)) {
+        return false;
+    }
+
+    if (!tensor_expect_plain_layout(l->hc_ffn_fn, 2, hc_dim, hc_mix_dim, 0, err, errlen) ||
+        !tensor_expect_layout(l->hc_ffn_scale,   DS4_TENSOR_F32,  1, 3, 0, 0, err, errlen) ||
+        !tensor_expect_layout(l->hc_ffn_base,    DS4_TENSOR_F32,  1, hc_mix_dim, 0, 0, err, errlen) ||
+        !tensor_expect_layout(l->ffn_norm,       DS4_TENSOR_F32,  1, DS4_N_EMBD, 0, 0, err, errlen) ||
+        !tensor_expect_plain_layout(l->ffn_gate_inp, 2, DS4_N_EMBD, DS4_N_EXPERT, 0, err, errlen) ||
+        !tensor_expect_layout(l->ffn_exp_probs_b, DS4_TENSOR_F32, 1, DS4_N_EXPERT, 0, 0, err, errlen) ||
+        !tensor_expect_routed_expert(l->ffn_gate_exps, 3, DS4_N_EMBD, DS4_N_FF_EXP, DS4_N_EXPERT, err, errlen) ||
+        !tensor_expect_routed_expert(l->ffn_up_exps,   3, DS4_N_EMBD, DS4_N_FF_EXP, DS4_N_EXPERT, err, errlen) ||
+        !tensor_expect_routed_expert(l->ffn_down_exps, 3, DS4_N_FF_EXP, DS4_N_EMBD, DS4_N_EXPERT, err, errlen)) {
+        return false;
+    }
+    if (l->ffn_gate_exps->type != l->ffn_up_exps->type)
+        return ds4_fail(err, errlen, "MTP routed gate/up experts use different quant types");
+    if (!tensor_expect_layout(l->ffn_gate_shexp, DS4_TENSOR_Q8_0, 2, DS4_N_EMBD, DS4_N_FF_EXP, 0, err, errlen) ||
+        !tensor_expect_layout(l->ffn_up_shexp,   DS4_TENSOR_Q8_0, 2, DS4_N_EMBD, DS4_N_FF_EXP, 0, err, errlen) ||
+        !tensor_expect_layout(l->ffn_down_shexp, DS4_TENSOR_Q8_0, 2, DS4_N_FF_EXP, DS4_N_EMBD, 0, err, errlen)) {
+        return false;
+    }
+    return true;
 }
 
 static bool ds4_shape_matches_metadata(
@@ -3205,127 +3230,141 @@ static void ds4_select_shape_from_metadata(
     exit(1);
 }
 
-static void validate_compress_ratio_metadata(const ds4_model *m) {
+static bool validate_compress_ratio_metadata(const ds4_model *m, char *err, size_t errlen) {
     const char *key = "deepseek4.attention.compress_ratios";
     ds4_array_ref arr;
     if (!model_get_array(m, key, &arr) ||
         (arr.type != GGUF_VALUE_UINT32 && arr.type != GGUF_VALUE_INT32)) {
-        fprintf(stderr, "ds4: required int32/uint32 array metadata key is missing: %s\n", key);
-        exit(1);
+        return ds4_fail(err, errlen,
+                        "required int32/uint32 array metadata key is missing: %s", key);
     }
-    if (arr.len < DS4_N_LAYER) {
-        ds4_die("deepseek4.attention.compress_ratios is shorter than the layer count");
-    }
+    if (arr.len < DS4_N_LAYER)
+        return ds4_fail(err, errlen,
+                        "deepseek4.attention.compress_ratios is shorter than the layer count");
 
     memset(g_ds4_compress_ratios, 0, sizeof(g_ds4_compress_ratios));
     ds4_cursor c = cursor_at(m, arr.data_pos);
     for (uint32_t il = 0; il < DS4_N_LAYER; il++) {
         uint32_t got = 0;
         if (arr.type == GGUF_VALUE_UINT32) {
-            if (!cursor_u32(&c, &got)) ds4_die(c.error);
+            if (!cursor_u32(&c, &got)) return ds4_fail(err, errlen, "%s", c.error);
         } else {
             int32_t v = 0;
-            if (!cursor_read(&c, &v, sizeof(v))) ds4_die(c.error);
-            if (v < 0) ds4_die("metadata array contains a negative value");
+            if (!cursor_read(&c, &v, sizeof(v))) return ds4_fail(err, errlen, "%s", c.error);
+            if (v < 0) return ds4_fail(err, errlen, "metadata array contains a negative value");
             got = (uint32_t)v;
         }
 
         const uint32_t expected = ds4_expected_layer_compress_ratio(il);
         if (got != expected) {
-            fprintf(stderr,
+            return ds4_fail(err, errlen,
                     "ds4: unexpected DeepSeek4 compression ratio at layer %u for %s: got %u, expected %u\n",
                     il, DS4_MODEL_SHAPE_NAME, got, expected);
-            exit(1);
         }
         g_ds4_compress_ratios[il] = got;
     }
+    return true;
 }
 
-static void config_expect_f32(const char *name, float got, float expected);
+static bool config_expect_f32(const char *name, float got, float expected,
+                              char *err, size_t errlen);
 
-static void validate_swiglu_clamp_metadata(const ds4_model *m) {
+static bool validate_swiglu_clamp_metadata(const ds4_model *m, char *err, size_t errlen) {
     const char *key = "deepseek4.swiglu_clamp_exp";
     ds4_array_ref arr;
     if (!model_get_array(m, key, &arr) ||
         (arr.type != GGUF_VALUE_FLOAT32 && arr.type != GGUF_VALUE_FLOAT64)) {
-        fprintf(stderr, "ds4: required float array metadata key is missing: %s\n", key);
-        exit(1);
+        return ds4_fail(err, errlen,
+                        "required float array metadata key is missing: %s", key);
     }
-    if (arr.len < DS4_N_LAYER) {
-        ds4_die("deepseek4.swiglu_clamp_exp is shorter than the layer count");
-    }
+    if (arr.len < DS4_N_LAYER)
+        return ds4_fail(err, errlen,
+                        "deepseek4.swiglu_clamp_exp is shorter than the layer count");
 
     ds4_cursor c = cursor_at(m, arr.data_pos);
     for (uint32_t i = 0; i < DS4_N_LAYER; i++) {
         float got = 0.0f;
         if (arr.type == GGUF_VALUE_FLOAT32) {
-            if (!cursor_read(&c, &got, sizeof(got))) ds4_die(c.error);
+            if (!cursor_read(&c, &got, sizeof(got))) return ds4_fail(err, errlen, "%s", c.error);
         } else {
             double v = 0.0;
-            if (!cursor_read(&c, &v, sizeof(v))) ds4_die(c.error);
+            if (!cursor_read(&c, &v, sizeof(v))) return ds4_fail(err, errlen, "%s", c.error);
             got = (float)v;
         }
-        config_expect_f32("swiglu_clamp_exp", got, DS4_SWIGLU_CLAMP_EXP);
+        if (!config_expect_f32("swiglu_clamp_exp", got, DS4_SWIGLU_CLAMP_EXP, err, errlen))
+            return false;
     }
+    return true;
 }
 
-static void config_expect_u32(const char *name, uint32_t got, uint32_t expected) {
-    if (got == expected) return;
-    fprintf(stderr, "ds4: expected %s=%u for %s, got %u\n",
-            name, expected, DS4_MODEL_SHAPE_NAME, got);
-    exit(1);
+static bool config_expect_u32(const char *name, uint32_t got, uint32_t expected,
+                               char *err, size_t errlen) {
+    if (got == expected) return true;
+    return ds4_fail(err, errlen, "expected %s=%u for %s, got %u",
+                    name, expected, DS4_MODEL_SHAPE_NAME, got);
 }
 
-static void config_expect_f32(const char *name, float got, float expected) {
+static bool config_expect_f32(const char *name, float got, float expected,
+                               char *err, size_t errlen) {
     const float scale = fabsf(expected) > 1.0f ? fabsf(expected) : 1.0f;
-    if (fabsf(got - expected) <= scale * 1.0e-6f) return;
-    fprintf(stderr, "ds4: expected %s=%.9g for %s, got %.9g\n",
-            name, (double)expected, DS4_MODEL_SHAPE_NAME, (double)got);
-    exit(1);
+    if (fabsf(got - expected) <= scale * 1.0e-6f) return true;
+    return ds4_fail(err, errlen, "expected %s=%.9g for %s, got %.9g",
+                    name, (double)expected, DS4_MODEL_SHAPE_NAME, (double)got);
 }
 
-static void config_expect_bool(const char *name, bool got, bool expected) {
-    if (got == expected) return;
-    fprintf(stderr, "ds4: expected %s=%s for %s, got %s\n",
+static bool config_expect_bool(const char *name, bool got, bool expected,
+                                char *err, size_t errlen) {
+    if (got == expected) return true;
+    return ds4_fail(err, errlen, "ds4: expected %s=%s for %s, got %s\n",
             name, expected ? "true" : "false", DS4_MODEL_SHAPE_NAME, got ? "true" : "false");
-    exit(1);
 }
 
-static void config_validate_fixed_shape(uint32_t n_layer) {
-    config_expect_u32("block_count",                  n_layer,                 DS4_N_LAYER);
+static bool config_validate_fixed_shape(uint32_t n_layer, char *err, size_t errlen) {
+    return config_expect_u32("block_count", n_layer, DS4_N_LAYER, err, errlen);
 }
 
 /* Validate metadata values that affect semantics: attention shape, HC count,
  * expert routing, RoPE scaling, compression ratios, and SwiGLU clamp. */
-static void config_validate_model(const ds4_model *m) {
-    const uint32_t n_layer = required_u32(m, "deepseek4.block_count");
-    const uint32_t n_embd = required_u32(m, "deepseek4.embedding_length");
-    const uint32_t n_vocab = required_u32(m, "deepseek4.vocab_size");
-    const uint32_t n_head = required_u32(m, "deepseek4.attention.head_count");
-    const uint32_t n_head_kv = required_u32(m, "deepseek4.attention.head_count_kv");
-    const uint32_t n_head_dim = required_u32(m, "deepseek4.attention.key_length");
-    const uint32_t n_value_dim = required_u32(m, "deepseek4.attention.value_length");
-    const uint32_t n_rot = required_u32(m, "deepseek4.rope.dimension_count");
-    const uint32_t n_lora_q = required_u32(m, "deepseek4.attention.q_lora_rank");
-    const uint32_t n_lora_o = required_u32(m, "deepseek4.attention.output_lora_rank");
-    const uint32_t n_out_group = required_u32(m, "deepseek4.attention.output_group_count");
-    const uint32_t n_expert = required_u32(m, "deepseek4.expert_count");
-    const uint32_t n_expert_used = required_u32(m, "deepseek4.expert_used_count");
-    const uint32_t n_ff_exp = required_u32(m, "deepseek4.expert_feed_forward_length");
-    const uint32_t n_expert_shared = required_u32(m, "deepseek4.expert_shared_count");
-    const uint32_t n_hash_layer = required_u32(m, "deepseek4.hash_layer_count");
+static bool config_validate_model(const ds4_model *m, char *err, size_t errlen) {
+    uint32_t n_layer = 0, n_embd = 0, n_vocab = 0, n_head = 0, n_head_kv = 0;
+    uint32_t n_head_dim = 0, n_value_dim = 0, n_rot = 0, n_lora_q = 0, n_lora_o = 0;
+    uint32_t n_out_group = 0, n_expert = 0, n_expert_used = 0, n_ff_exp = 0;
+    uint32_t n_expert_shared = 0, n_hash_layer = 0;
+    if (!required_u32(m, "deepseek4.block_count", &n_layer, err, errlen) ||
+        !required_u32(m, "deepseek4.embedding_length", &n_embd, err, errlen) ||
+        !required_u32(m, "deepseek4.vocab_size", &n_vocab, err, errlen) ||
+        !required_u32(m, "deepseek4.attention.head_count", &n_head, err, errlen) ||
+        !required_u32(m, "deepseek4.attention.head_count_kv", &n_head_kv, err, errlen) ||
+        !required_u32(m, "deepseek4.attention.key_length", &n_head_dim, err, errlen) ||
+        !required_u32(m, "deepseek4.attention.value_length", &n_value_dim, err, errlen) ||
+        !required_u32(m, "deepseek4.rope.dimension_count", &n_rot, err, errlen) ||
+        !required_u32(m, "deepseek4.attention.q_lora_rank", &n_lora_q, err, errlen) ||
+        !required_u32(m, "deepseek4.attention.output_lora_rank", &n_lora_o, err, errlen) ||
+        !required_u32(m, "deepseek4.attention.output_group_count", &n_out_group, err, errlen) ||
+        !required_u32(m, "deepseek4.expert_count", &n_expert, err, errlen) ||
+        !required_u32(m, "deepseek4.expert_used_count", &n_expert_used, err, errlen) ||
+        !required_u32(m, "deepseek4.expert_feed_forward_length", &n_ff_exp, err, errlen) ||
+        !required_u32(m, "deepseek4.expert_shared_count", &n_expert_shared, err, errlen) ||
+        !required_u32(m, "deepseek4.hash_layer_count", &n_hash_layer, err, errlen)) {
+        return false;
+    }
     uint32_t n_expert_groups = 0;
     uint32_t n_group_used = 0;
     model_get_u32(m, "deepseek4.expert_group_count", &n_expert_groups);
     model_get_u32(m, "deepseek4.expert_group_used_count", &n_group_used);
-    const uint32_t n_swa = required_u32(m, "deepseek4.attention.sliding_window");
-    const uint32_t n_indexer_head = required_u32(m, "deepseek4.attention.indexer.head_count");
-    const uint32_t n_indexer_head_dim = required_u32(m, "deepseek4.attention.indexer.key_length");
-    const uint32_t n_indexer_top_k = required_u32(m, "deepseek4.attention.indexer.top_k");
-    const uint32_t n_hc = required_u32(m, "deepseek4.hyper_connection.count");
-    const uint32_t n_hc_sinkhorn_iter = required_u32(m, "deepseek4.hyper_connection.sinkhorn_iterations");
+    uint32_t n_swa = 0, n_indexer_head = 0, n_indexer_head_dim = 0;
+    uint32_t n_indexer_top_k = 0, n_hc = 0, n_hc_sinkhorn_iter = 0;
+    if (!required_u32(m, "deepseek4.attention.sliding_window", &n_swa, err, errlen) ||
+        !required_u32(m, "deepseek4.attention.indexer.head_count", &n_indexer_head, err, errlen) ||
+        !required_u32(m, "deepseek4.attention.indexer.key_length", &n_indexer_head_dim, err, errlen) ||
+        !required_u32(m, "deepseek4.attention.indexer.top_k", &n_indexer_top_k, err, errlen) ||
+        !required_u32(m, "deepseek4.hyper_connection.count", &n_hc, err, errlen) ||
+        !required_u32(m, "deepseek4.hyper_connection.sinkhorn_iterations", &n_hc_sinkhorn_iter, err, errlen) {
+        return false;
+    }
 
-    ds4_select_shape_from_metadata(n_layer,
+    if (!ds4_select_shape_from_metadata(
+                                   n_layer,
                                    n_embd,
                                    n_vocab,
                                    n_head,
@@ -3346,25 +3385,29 @@ static void config_validate_model(const ds4_model *m) {
                                    n_indexer_head_dim,
                                    n_indexer_top_k,
                                    n_hc,
-                                   n_hc_sinkhorn_iter);
+                                   n_hc_sinkhorn_iter)) return false;
 
-    config_expect_u32("embedding_length",            n_embd,         DS4_N_EMBD);
-    config_expect_u32("vocab_size",                  n_vocab,        DS4_N_VOCAB);
-    config_expect_u32("attention.head_count",        n_head,         DS4_N_HEAD);
-    config_expect_u32("attention.key_length",        n_head_dim,     DS4_N_HEAD_DIM);
-    config_expect_u32("attention.head_count_kv",     n_head_kv,      DS4_N_HEAD_KV);
-    config_expect_u32("attention.value_length",      n_value_dim,    DS4_N_VALUE_DIM);
-    config_expect_u32("rope.dimension_count",        n_rot,          DS4_N_ROT);
-    config_expect_u32("attention.output_group_count", n_out_group,    DS4_N_OUT_GROUP);
-    config_expect_u32("attention.q_lora_rank",       n_lora_q,        DS4_N_LORA_Q);
-    config_expect_u32("attention.output_lora_rank",  n_lora_o,        DS4_N_LORA_O);
-    config_expect_u32("expert_count",               n_expert,        DS4_N_EXPERT);
-    config_expect_u32("expert_used_count",          n_expert_used,   DS4_N_EXPERT_USED);
-    config_expect_u32("expert_feed_forward_length", n_ff_exp,        DS4_N_FF_EXP);
-    config_expect_u32("expert_shared_count",         n_expert_shared, DS4_N_EXPERT_SHARED);
-    config_expect_u32("hash_layer_count",            n_hash_layer,    DS4_N_HASH_LAYER);
-    config_expect_u32("expert_group_count",         n_expert_groups, 0);
-    config_expect_u32("expert_group_used_count",    n_group_used,    0);
+    if (!config_expect_u32("embedding_length",           n_embd,          DS4_N_EMBD, err, errlen) ||
+        !config_expect_u32("vocab_size",                 n_vocab,         DS4_N_VOCAB, err, errlen) ||
+        !config_expect_u32("attention.head_count",       n_head,          DS4_N_HEAD, err, errlen) ||
+        !config_expect_u32("attention.key_length",       n_head_dim,      DS4_N_HEAD_DIM, err, errlen) ||
+        !config_expect_u32("attention.head_count_kv",    n_head_kv,       DS4_N_HEAD_KV, err, errlen) ||
+        !config_expect_u32("attention.value_length",     n_value_dim,     DS4_N_VALUE_DIM, err, errlen) ||
+        !config_expect_u32("rope.dimension_count",       n_rot,           DS4_N_ROT, err, errlen) ||
+        !config_expect_u32("attention.output_group_count", n_out_group,   DS4_N_OUT_GROUP, err, errlen) ||
+        !config_expect_u32("attention.q_lora_rank",      n_lora_q,        DS4_N_LORA_Q, err, errlen) ||
+        !config_expect_u32("attention.output_lora_rank", n_lora_o,        DS4_N_LORA_O, err, errlen) ||
+        !config_expect_u32("expert_count",               n_expert,        DS4_N_EXPERT, err, errlen) ||
+        !config_expect_u32("expert_used_count",          n_expert_used,   DS4_N_EXPERT_USED, err, errlen) ||
+        !config_expect_u32("expert_feed_forward_length", n_ff_exp,        DS4_N_FF_EXP, err, errlen) ||
+        !config_expect_u32("expert_shared_count",        n_expert_shared, DS4_N_EXPERT_SHARED, err, errlen) ||
+        !config_expect_u32("hash_layer_count",           n_hash_layer,    DS4_N_HASH_LAYER, err, errlen) ||
+        !config_expect_u32("expert_group_count",         n_expert_groups, 0, err, errlen) ||
+        !config_expect_u32("expert_group_used_count",    n_group_used, 0, err, errlen)) {
+        return false;
+    }
+
+
 
     config_expect_u32("attention.sliding_window",     n_swa,                   DS4_N_SWA);
     config_expect_u32("attention.indexer.head_count", n_indexer_head,     DS4_N_INDEXER_HEAD);
@@ -3372,41 +3415,70 @@ static void config_validate_model(const ds4_model *m) {
     config_expect_u32("attention.indexer.top_k",      n_indexer_top_k,    DS4_N_INDEXER_TOP_K);
     config_expect_u32("hyper_connection.count", n_hc, DS4_N_HC);
     config_expect_u32("hyper_connection.sinkhorn_iterations", n_hc_sinkhorn_iter, DS4_N_HC_SINKHORN_ITER);
+ 
+    if (!config_expect_u32("attention.sliding_window",     n_swa,              DS4_N_SWA, err, errlen) ||
+        !config_expect_u32("attention.indexer.head_count", n_indexer_head,     DS4_N_INDEXER_HEAD, err, errlen) ||
+        !config_expect_u32("attention.indexer.key_length", n_indexer_head_dim, DS4_N_INDEXER_HEAD_DIM, err, errlen) ||
+        !config_expect_u32("attention.indexer.top_k",      n_indexer_top_k,    DS4_N_INDEXER_TOP_K, err, errlen) ||
+        !config_expect_u32("hyper_connection.count", n_hc, DS4_N_HC, err, errlen) ||
+        !config_expect_u32("hyper_connection.sinkhorn_iterations", n_hc_sinkhorn_iter, DS4_N_HC_SINKHORN_ITER, err, errlen)) {
+        return false;
+    }
+    if (!config_validate_fixed_shape(n_layer, err, errlen) ||
+        !validate_compress_ratio_metadata(m, err, errlen) ||
+        !validate_swiglu_clamp_metadata(m, err, errlen)) {
+        return false;
+    }
 
-    config_validate_fixed_shape(n_layer);
-    validate_compress_ratio_metadata(m);
+    uint64_t rope_orig_ctx = 0;
+    if (!required_u64(m, "deepseek4.rope.scaling.original_context_length",
+                      &rope_orig_ctx, err, errlen)) {
+        return false;
+    }
+    if (rope_orig_ctx != DS4_ROPE_ORIG_CTX)
+        return ds4_fail(err, errlen,
+                        "expected rope.scaling.original_context_length=%" PRIu64
+                        " for DeepSeek4 Flash, got %" PRIu64,
+                        (uint64_t)DS4_ROPE_ORIG_CTX, rope_orig_ctx);
 
-    validate_swiglu_clamp_metadata(m);
 
     uint64_t rope_orig_ctx = DS4_ROPE_ORIG_CTX;
     model_get_u64_compat(m, "deepseek4.rope.scaling.original_context_length", &rope_orig_ctx);
     if (rope_orig_ctx != DS4_ROPE_ORIG_CTX) {
-        fprintf(stderr, "ds4: expected rope.scaling.original_context_length=%" PRIu64
+        return ds4_fail(err, errlen, "ds4: expected rope.scaling.original_context_length=%" PRIu64
                 " for %s, got %" PRIu64 "\n",
                 (uint64_t)DS4_ROPE_ORIG_CTX, DS4_MODEL_SHAPE_NAME, rope_orig_ctx);
-        exit(1);
     }
-    const float rope_freq_base = required_f32(m, "deepseek4.rope.freq_base");
-    config_expect_f32("rope.freq_base", rope_freq_base, DS4_ROPE_FREQ_BASE);
-    float rope_scale_factor = DS4_ROPE_SCALE_FACTOR;
+    float rope_freq_base = 0.0f, rope_scale_factor = DS4_ROPE_SCALE_FACTOR;
+    float rope_yarn_beta_fast = DS4_ROPE_YARN_BETA_FAST, rope_yarn_beta_slow = DS4_ROPE_YARN_BETA_SLOW;
+    float compress_rope_freq_base = 0.0f, expert_weight_scale = 0.0f;
     model_get_f32_compat(m, "deepseek4.rope.scaling.factor", &rope_scale_factor);
-    config_expect_f32("rope.scaling.factor", rope_scale_factor, DS4_ROPE_SCALE_FACTOR);
-    float rope_yarn_beta_fast = DS4_ROPE_YARN_BETA_FAST;
     model_get_f32_compat(m, "deepseek4.rope.scaling.yarn_beta_fast", &rope_yarn_beta_fast);
-    config_expect_f32("rope.scaling.yarn_beta_fast", rope_yarn_beta_fast, DS4_ROPE_YARN_BETA_FAST);
-    float rope_yarn_beta_slow = DS4_ROPE_YARN_BETA_SLOW;
     model_get_f32_compat(m, "deepseek4.rope.scaling.yarn_beta_slow", &rope_yarn_beta_slow);
-    config_expect_f32("rope.scaling.yarn_beta_slow", rope_yarn_beta_slow, DS4_ROPE_YARN_BETA_SLOW);
-    const float compress_rope_freq_base = required_f32(m, "deepseek4.attention.compress_rope_freq_base");
-    config_expect_f32("attention.compress_rope_freq_base", compress_rope_freq_base, DS4_COMPRESS_ROPE_FREQ_BASE);
-    const float expert_weight_scale = required_f32(m, "deepseek4.expert_weights_scale");
-    config_expect_f32("expert_weights_scale", expert_weight_scale, DS4_EXPERT_WEIGHT_SCALE);
-    const float rms_eps = required_f32(m, "deepseek4.attention.layer_norm_rms_epsilon");
-    config_expect_f32("attention.layer_norm_rms_epsilon", rms_eps, DS4_RMS_EPS);
-    const float hc_eps = required_f32(m, "deepseek4.hyper_connection.epsilon");
-    config_expect_f32("hyper_connection.epsilon", hc_eps, DS4_HC_EPS);
-    const bool expert_weight_norm = required_bool(m, "deepseek4.expert_weights_norm");
-    config_expect_bool("expert_weights_norm", expert_weight_norm, true);
+
+    float rms_eps = 0.0f, hc_eps = 0.0f;
+    if (!required_f32(m, "deepseek4.rope.freq_base", &rope_freq_base, err, errlen) ||
+        !config_expect_f32("rope.freq_base", rope_freq_base, DS4_ROPE_FREQ_BASE, err, errlen) ||
+        !config_expect_f32("rope.scaling.factor", rope_scale_factor, DS4_ROPE_SCALE_FACTOR, err, errlen) ||
+        !config_expect_f32("rope.scaling.yarn_beta_fast", rope_yarn_beta_fast, DS4_ROPE_YARN_BETA_FAST, err, errlen) ||
+        !config_expect_f32("rope.scaling.yarn_beta_slow", rope_yarn_beta_slow, DS4_ROPE_YARN_BETA_SLOW, err, errlen) ||
+        !required_f32(m, "deepseek4.attention.compress_rope_freq_base", &compress_rope_freq_base, err, errlen) ||
+        !config_expect_f32("attention.compress_rope_freq_base", compress_rope_freq_base, DS4_COMPRESS_ROPE_FREQ_BASE, err, errlen) ||
+        !required_f32(m, "deepseek4.expert_weights_scale", &expert_weight_scale, err, errlen) ||
+        !config_expect_f32("expert_weights_scale", expert_weight_scale, DS4_EXPERT_WEIGHT_SCALE, err, errlen) ||
+        !required_f32(m, "deepseek4.attention.layer_norm_rms_epsilon", &rms_eps, err, errlen) ||
+        !config_expect_f32("attention.layer_norm_rms_epsilon", rms_eps, DS4_RMS_EPS, err, errlen) ||
+        !required_f32(m, "deepseek4.hyper_connection.epsilon", &hc_eps, err, errlen) ||
+        !config_expect_f32("hyper_connection.epsilon", hc_eps, DS4_HC_EPS, err, errlen)) {
+        return false;
+    }
+
+    bool expert_weight_norm = false;
+    if (!required_bool(m, "deepseek4.expert_weights_norm", &expert_weight_norm, err, errlen) ||
+        !config_expect_bool("expert_weights_norm", expert_weight_norm, true, err, errlen)) {
+        return false;
+    }
+    return true;
 }
 
 static void weights_bind_output(ds4_weights *w, const ds4_model *m, bool required, bool optional) {
@@ -3486,8 +3558,15 @@ static void weights_bind(
         uint32_t         load_layer_start,
         uint32_t         load_layer_end,
         bool             require_output,
-        bool             optional_output) {
+        bool             optional_output,
+        char *err, size_t errlen) {
     memset(w, 0, sizeof(*w));
+    w->token_embd       = required_tensor(m, "token_embd.weight");
+    w->output_hc_base   = required_tensor(m, "output_hc_base.weight");
+    w->output_hc_fn     = required_tensor(m, "output_hc_fn.weight");
+    w->output_hc_scale  = required_tensor(m, "output_hc_scale.weight");
+    w->output_norm      = required_tensor(m, "output_norm.weight");
+    w->output           = required_tensor(m, "output.weight");
 
     uint32_t start = 0;
     uint32_t end = DS4_N_LAYER - 1u;
@@ -3514,7 +3593,7 @@ static void weights_bind(
         weights_bind_layer(&w->layer[il], m, il);
     }
 
-    weights_validate_layout(w, start, end, require_token_embd, require_output);
+    weights_validate_layout(w, start, end, require_token_embd, require_output, err, errlen);
 }
 
 typedef struct {
@@ -3691,45 +3770,47 @@ static DS4_MAYBE_UNUSED bool weights_model_map_spans(
     return spans->len != 0;
 }
 
-static void mtp_weights_bind(ds4_mtp_weights *w, const ds4_model *m) {
+static bool mtp_weights_bind(ds4_mtp_weights *w, const ds4_model *m,
+                             char *err, size_t errlen) {
     memset(w, 0, sizeof(*w));
 
-    w->hc_head_base  = required_tensor(m, "mtp.0.hc_head_base.weight");
-    w->hc_head_fn    = required_tensor(m, "mtp.0.hc_head_fn.weight");
-    w->hc_head_scale = required_tensor(m, "mtp.0.hc_head_scale.weight");
-    w->e_proj        = required_tensor(m, "mtp.0.e_proj.weight");
-    w->h_proj        = required_tensor(m, "mtp.0.h_proj.weight");
-    w->enorm         = required_tensor(m, "mtp.0.enorm.weight");
-    w->hnorm         = required_tensor(m, "mtp.0.hnorm.weight");
-    w->norm          = required_tensor(m, "mtp.0.norm.weight");
-
     ds4_layer_weights *l = &w->block;
-    l->hc_attn_fn      = required_tensor(m, "mtp.0.hc_attn_fn.weight");
-    l->hc_attn_scale   = required_tensor(m, "mtp.0.hc_attn_scale.weight");
-    l->hc_attn_base    = required_tensor(m, "mtp.0.hc_attn_base.weight");
-    l->attn_norm       = required_tensor(m, "mtp.0.attn_norm.weight");
-    l->attn_q_a        = required_tensor(m, "mtp.0.attn_q_a.weight");
-    l->attn_q_a_norm   = required_tensor(m, "mtp.0.attn_q_a_norm.weight");
-    l->attn_q_b        = required_tensor(m, "mtp.0.attn_q_b.weight");
-    l->attn_kv         = required_tensor(m, "mtp.0.attn_kv.weight");
-    l->attn_kv_a_norm  = required_tensor(m, "mtp.0.attn_kv_a_norm.weight");
-    l->attn_sinks      = required_tensor(m, "mtp.0.attn_sinks.weight");
-    l->attn_output_a   = required_tensor(m, "mtp.0.attn_output_a.weight");
-    l->attn_output_b   = required_tensor(m, "mtp.0.attn_output_b.weight");
-    l->hc_ffn_fn       = required_tensor(m, "mtp.0.hc_ffn_fn.weight");
-    l->hc_ffn_scale    = required_tensor(m, "mtp.0.hc_ffn_scale.weight");
-    l->hc_ffn_base     = required_tensor(m, "mtp.0.hc_ffn_base.weight");
-    l->ffn_norm        = required_tensor(m, "mtp.0.ffn_norm.weight");
-    l->ffn_gate_inp    = required_tensor(m, "mtp.0.ffn_gate_inp.weight");
-    l->ffn_exp_probs_b = required_tensor(m, "mtp.0.exp_probs_b.bias");
-    l->ffn_gate_exps   = required_tensor(m, "mtp.0.ffn_gate_exps.weight");
-    l->ffn_up_exps     = required_tensor(m, "mtp.0.ffn_up_exps.weight");
-    l->ffn_down_exps   = required_tensor(m, "mtp.0.ffn_down_exps.weight");
-    l->ffn_gate_shexp  = required_tensor(m, "mtp.0.ffn_gate_shexp.weight");
-    l->ffn_up_shexp    = required_tensor(m, "mtp.0.ffn_up_shexp.weight");
-    l->ffn_down_shexp  = required_tensor(m, "mtp.0.ffn_down_shexp.weight");
+    if (!required_tensor(m, "mtp.0.hc_head_base.weight", &w->hc_head_base, err, errlen) ||
+        !required_tensor(m, "mtp.0.hc_head_fn.weight", &w->hc_head_fn, err, errlen) ||
+        !required_tensor(m, "mtp.0.hc_head_scale.weight", &w->hc_head_scale, err, errlen) ||
+        !required_tensor(m, "mtp.0.e_proj.weight", &w->e_proj, err, errlen) ||
+        !required_tensor(m, "mtp.0.h_proj.weight", &w->h_proj, err, errlen) ||
+        !required_tensor(m, "mtp.0.enorm.weight", &w->enorm, err, errlen) ||
+        !required_tensor(m, "mtp.0.hnorm.weight", &w->hnorm, err, errlen) ||
+        !required_tensor(m, "mtp.0.norm.weight", &w->norm, err, errlen) ||
+        !required_tensor(m, "mtp.0.hc_attn_fn.weight", &l->hc_attn_fn, err, errlen) ||
+        !required_tensor(m, "mtp.0.hc_attn_scale.weight", &l->hc_attn_scale, err, errlen) ||
+        !required_tensor(m, "mtp.0.hc_attn_base.weight", &l->hc_attn_base, err, errlen) ||
+        !required_tensor(m, "mtp.0.attn_norm.weight", &l->attn_norm, err, errlen) ||
+        !required_tensor(m, "mtp.0.attn_q_a.weight", &l->attn_q_a, err, errlen) ||
+        !required_tensor(m, "mtp.0.attn_q_a_norm.weight", &l->attn_q_a_norm, err, errlen) ||
+        !required_tensor(m, "mtp.0.attn_q_b.weight", &l->attn_q_b, err, errlen) ||
+        !required_tensor(m, "mtp.0.attn_kv.weight", &l->attn_kv, err, errlen) ||
+        !required_tensor(m, "mtp.0.attn_kv_a_norm.weight", &l->attn_kv_a_norm, err, errlen) ||
+        !required_tensor(m, "mtp.0.attn_sinks.weight", &l->attn_sinks, err, errlen) ||
+        !required_tensor(m, "mtp.0.attn_output_a.weight", &l->attn_output_a, err, errlen) ||
+        !required_tensor(m, "mtp.0.attn_output_b.weight", &l->attn_output_b, err, errlen) ||
+        !required_tensor(m, "mtp.0.hc_ffn_fn.weight", &l->hc_ffn_fn, err, errlen) ||
+        !required_tensor(m, "mtp.0.hc_ffn_scale.weight", &l->hc_ffn_scale, err, errlen) ||
+        !required_tensor(m, "mtp.0.hc_ffn_base.weight", &l->hc_ffn_base, err, errlen) ||
+        !required_tensor(m, "mtp.0.ffn_norm.weight", &l->ffn_norm, err, errlen) ||
+        !required_tensor(m, "mtp.0.ffn_gate_inp.weight", &l->ffn_gate_inp, err, errlen) ||
+        !required_tensor(m, "mtp.0.exp_probs_b.bias", &l->ffn_exp_probs_b, err, errlen) ||
+        !required_tensor(m, "mtp.0.ffn_gate_exps.weight", &l->ffn_gate_exps, err, errlen) ||
+        !required_tensor(m, "mtp.0.ffn_up_exps.weight", &l->ffn_up_exps, err, errlen) ||
+        !required_tensor(m, "mtp.0.ffn_down_exps.weight", &l->ffn_down_exps, err, errlen) ||
+        !required_tensor(m, "mtp.0.ffn_gate_shexp.weight", &l->ffn_gate_shexp, err, errlen) ||
+        !required_tensor(m, "mtp.0.ffn_up_shexp.weight", &l->ffn_up_shexp, err, errlen) ||
+        !required_tensor(m, "mtp.0.ffn_down_shexp.weight", &l->ffn_down_shexp, err, errlen)) {
+        return false;
+    }
 
-    mtp_weights_validate_layout(w);
+    return mtp_weights_validate_layout(w, err, errlen);
 }
 
 static void weights_free(ds4_weights *w) {
@@ -20064,14 +20145,18 @@ int ds4_engine_open(ds4_engine **out, const ds4_engine_options *opt) {
             return 1;
         }
     }
-    config_validate_model(&e->model);
-    weights_bind(&e->weights,
+    if (!config_validate_model(&e->model, NULL, 0) ||
+        !weights_bind(&e->weights,
                  &e->model,
                  load_slice,
                  load_layer_start,
                  load_layer_end,
                  load_output,
-                 load_output_optional);
+                 load_output_optional, NULL, 0)) {
+        ds4_engine_close(e);
+        *out = NULL;
+        return 1;
+    }
     if (opt->inspect_only) {
         *out = e;
         return 0;
@@ -20088,7 +20173,11 @@ int ds4_engine_open(ds4_engine **out, const ds4_engine_options *opt) {
             *out = NULL;
             return 1;
         }
-        mtp_weights_bind(&e->mtp_weights, &e->mtp_model);
+        if (!mtp_weights_bind(&e->mtp_weights, &e->mtp_model, NULL, 0)) {
+            ds4_engine_close(e);
+            *out = NULL;
+            return 1;
+        }
         e->mtp_ready = true;
         fprintf(stderr, "ds4: MTP support model loaded: %s (draft=%d)\n",
                 opt->mtp_path,
