@@ -618,11 +618,6 @@ static uint32_t ds4_expected_layer_compress_ratio(uint32_t il) {
     }
 }
 
-static void ds4_die_errno(const char *what, const char *path) {
-    fprintf(stderr, "ds4: %s '%s': %s\n", what, path, strerror(errno));
-    exit(1);
-}
-
 static bool ds4_streq(ds4_str s, const char *z) {
     size_t n = strlen(z);
     return s.len == n && memcmp(s.ptr, z, n) == 0;
@@ -1439,17 +1434,17 @@ static void model_prefetch_cpu_mapping(const ds4_model *m) {
 
 /* Read the GGUF metadata table.  Values stay in the mmap; we store offsets so
  * later validation can decode only the keys it needs. */
-static void parse_metadata(ds4_model *m, ds4_cursor *c) {
+static bool parse_metadata(ds4_model *m, ds4_cursor *c, char *err, size_t errlen) {
     m->kv = calloc((size_t)m->n_kv, sizeof(m->kv[0]));
-    if (!m->kv) ds4_die("out of memory while allocating metadata table");
+    if (!m->kv) return ds4_fail(err, errlen, "out of memory while allocating metadata table");
 
     m->alignment = 32;
 
     for (uint64_t i = 0; i < m->n_kv; i++) {
         ds4_kv *kv = &m->kv[i];
 
-        if (!cursor_string(c, &kv->key)) ds4_die(c->error);
-        if (!cursor_u32(c, &kv->type)) ds4_die(c->error);
+        if (!cursor_string(c, &kv->key)) return ds4_fail(err, errlen, "%s", c->error);
+        if (!cursor_u32(c, &kv->type)) return ds4_fail(err, errlen, "%s", c->error);
 
         kv->value_pos = c->pos;
 
@@ -1463,36 +1458,37 @@ static void parse_metadata(ds4_model *m, ds4_cursor *c) {
             }
         }
 
-        if (!skip_value(c, kv->type, 0)) ds4_die(c->error);
+        if (!skip_value(c, kv->type, 0)) return ds4_fail(err, errlen, "%s", c->error);
     }
+    return true;
 }
 
 /* Read the tensor directory and convert relative GGUF offsets to absolute
  * mmap offsets.  Tensor bytes are still never copied here. */
-static void parse_tensors(ds4_model *m, ds4_cursor *c) {
+static bool parse_tensors(ds4_model *m, ds4_cursor *c, char *err, size_t errlen) {
     m->tensors = calloc((size_t)m->n_tensors, sizeof(m->tensors[0]));
-    if (!m->tensors) ds4_die("out of memory while allocating tensor table");
+    if (!m->tensors) return ds4_fail(err, errlen, "out of memory while allocating tensor table");
 
     for (uint64_t i = 0; i < m->n_tensors; i++) {
         ds4_tensor *t = &m->tensors[i];
 
-        if (!cursor_string(c, &t->name)) ds4_die(c->error);
-        if (!cursor_u32(c, &t->ndim)) ds4_die(c->error);
+        if (!cursor_string(c, &t->name)) return ds4_fail(err, errlen, "%s", c->error);
+        if (!cursor_u32(c, &t->ndim)) return ds4_fail(err, errlen, "%s", c->error);
         if (t->ndim == 0 || t->ndim > DS4_MAX_DIMS) {
-            ds4_die("tensor has an unsupported number of dimensions");
+            return ds4_fail(err, errlen, "tensor has an unsupported number of dimensions");
         }
 
         t->elements = 1;
         for (uint32_t d = 0; d < t->ndim; d++) {
-            if (!cursor_u64(c, &t->dim[d])) ds4_die(c->error);
+            if (!cursor_u64(c, &t->dim[d])) return ds4_fail(err, errlen, "%s", c->error);
             if (t->dim[d] != 0 && t->elements > UINT64_MAX / t->dim[d]) {
-                ds4_die("tensor element count overflow");
+                return ds4_fail(err, errlen, "tensor element count overflow");
             }
             t->elements *= t->dim[d];
         }
 
-        if (!cursor_u32(c, &t->type)) ds4_die(c->error);
-        if (!cursor_u64(c, &t->rel_offset)) ds4_die(c->error);
+        if (!cursor_u32(c, &t->type)) return ds4_fail(err, errlen, "%s", c->error);
+        if (!cursor_u64(c, &t->rel_offset)) return ds4_fail(err, errlen, "%s", c->error);
 
         if (!tensor_nbytes(t->type, t->elements, &t->bytes)) {
             ds4_log(stderr,
@@ -1507,35 +1503,43 @@ static void parse_tensors(ds4_model *m, ds4_cursor *c) {
     for (uint64_t i = 0; i < m->n_tensors; i++) {
         ds4_tensor *t = &m->tensors[i];
         if (t->rel_offset > UINT64_MAX - m->tensor_data_pos) {
-            ds4_die("tensor offset overflow");
+            return ds4_fail(err, errlen, "tensor offset overflow");
         }
         t->abs_offset = m->tensor_data_pos + t->rel_offset;
         if (t->bytes != 0 &&
             (t->abs_offset > m->size || t->bytes > m->size - t->abs_offset))
         {
-            ds4_die("tensor points outside GGUF file");
+            return ds4_fail(err, errlen, "tensor points outside GGUF file");
         }
         if (t->bytes > m->max_tensor_bytes) {
             m->max_tensor_bytes = t->bytes;
         }
     }
+    return true;
 }
 
 /* Open and map the GGUF once.  Metal needs a shared mapping for no-copy
  * MTLBuffers; CPU uses a private read-only mapping to avoid Darwin VM stress.
  * Tokenizer-only callers pass prefetch_cpu=false so inspecting tokens never
  * walks the huge tensor payload. */
-static void model_open(ds4_model *m, const char *path, bool metal_mapping,
-                       bool prefetch_cpu) {
+static bool model_open(ds4_model *m, const char *path, bool metal_mapping,
+                       bool prefetch_cpu, char *err, size_t errlen) {
     memset(m, 0, sizeof(*m));
     m->fd = -1;
 
     int fd = open(path, O_RDONLY);
-    if (fd == -1) ds4_die_errno("cannot open model", path);
+    if (fd == -1) return ds4_fail_errno(err, errlen, "cannot open model", path);
 
     struct stat st;
-    if (fstat(fd, &st) == -1) ds4_die_errno("cannot stat model", path);
-    if (st.st_size < 32) ds4_die("model file is too small to be GGUF");
+    if (fstat(fd, &st) == -1) {
+        ds4_fail_errno(err, errlen, "cannot stat model", path);
+        close(fd);
+        return false;
+    }
+    if (st.st_size < 32) {
+        close(fd);
+        return ds4_fail(err, errlen, "model file is too small to be GGUF");
+    }
 
     /*
      * Metal wraps slices of this mapping as no-copy MTLBuffers, so the Metal
@@ -1551,26 +1555,32 @@ static void model_open(ds4_model *m, const char *path, bool metal_mapping,
      */
     const int mmap_flags = metal_mapping ? MAP_SHARED : MAP_PRIVATE;
     void *map = mmap(NULL, (size_t)st.st_size, PROT_READ, mmap_flags, fd, 0);
-    if (map == MAP_FAILED) ds4_die_errno("cannot mmap model", path);
+    if (map == MAP_FAILED) {
+        ds4_fail_errno(err, errlen, "cannot mmap model", path);
+        close(fd);
+        return false;
+    }
 
     m->fd = fd;
     m->map = map;
     m->size = (uint64_t)st.st_size;
 
+    /* From here on m owns fd and the mapping: any failure runs model_close()
+     * so the caller is always handed a clean, zeroed model on false. */
     ds4_cursor c = cursor_at(m, 0);
     uint32_t magic;
-    if (!cursor_u32(&c, &magic)) ds4_die(c.error);
-    if (magic != DS4_GGUF_MAGIC) ds4_die("model is not a GGUF file");
-    if (!cursor_u32(&c, &m->version)) ds4_die(c.error);
-    if (!cursor_u64(&c, &m->n_tensors)) ds4_die(c.error);
-    if (!cursor_u64(&c, &m->n_kv)) ds4_die(c.error);
+    if (!cursor_u32(&c, &magic)) { model_close(m); return ds4_fail(err, errlen, "%s", c.error); }
+    if (magic != DS4_GGUF_MAGIC) { model_close(m); return ds4_fail(err, errlen, "model is not a GGUF file"); }
+    if (!cursor_u32(&c, &m->version)) { model_close(m); return ds4_fail(err, errlen, "%s", c.error); }
+    if (!cursor_u64(&c, &m->n_tensors)) { model_close(m); return ds4_fail(err, errlen, "%s", c.error); }
+    if (!cursor_u64(&c, &m->n_kv)) { model_close(m); return ds4_fail(err, errlen, "%s", c.error); }
+    if (m->version != 3) { model_close(m); return ds4_fail(err, errlen, "only GGUF v3 is supported"); }
 
-    if (m->version != 3) ds4_die("only GGUF v3 is supported");
-
-    parse_metadata(m, &c);
-    parse_tensors(m, &c);
+    if (!parse_metadata(m, &c, err, errlen)) { model_close(m); return false; }
+    if (!parse_tensors(m, &c, err, errlen)) { model_close(m); return false; }
 
     if (!metal_mapping && prefetch_cpu) model_prefetch_cpu_mapping(m);
+    return true;
 }
 
 static void print_size(uint64_t bytes) {
@@ -17615,7 +17625,8 @@ int ds4_dump_text_tokenization(const char *model_path, const char *text, FILE *f
     token_vec tokens = {0};
 
     if (!fp) fp = stdout;
-    model_open(&model, model_path, false, false);
+    if (!model_open(&model, model_path, false, false, NULL, 0))
+        return 1;
     vocab_load(&vocab, &model);
     tokenize_rendered_chat_vocab(&vocab, text ? text : "", &tokens);
 
@@ -18076,7 +18087,11 @@ int ds4_engine_open(ds4_engine **out, const ds4_engine_options *opt) {
     ds4_acquire_instance_lock();
 
     const bool graph_backend = ds4_backend_uses_graph(opt->backend);
-    model_open(&e->model, opt->model_path, graph_backend, !opt->inspect_only);
+    if (!model_open(&e->model, opt->model_path, graph_backend, !opt->inspect_only, NULL, 0)) {
+        ds4_engine_close(e);
+        *out = NULL;
+        return 1;
+    }
     if (opt->warm_weights) model_warm_weights(&e->model);
     if (!opt->inspect_only) vocab_load(&e->vocab, &e->model);
     config_validate_model(&e->model);
@@ -18091,7 +18106,11 @@ int ds4_engine_open(ds4_engine **out, const ds4_engine_options *opt) {
         return 1;
     }
     if (opt->mtp_path && opt->mtp_path[0]) {
-        model_open(&e->mtp_model, opt->mtp_path, graph_backend, true);
+        if (!model_open(&e->mtp_model, opt->mtp_path, graph_backend, true, NULL, 0)) {
+            ds4_engine_close(e);
+            *out = NULL;
+            return 1;
+        }
         mtp_weights_bind(&e->mtp_weights, &e->mtp_model);
         e->mtp_ready = true;
         fprintf(stderr, "ds4: MTP support model loaded: %s (draft=%d)\n",
