@@ -18,6 +18,17 @@ typedef struct ds4_gpu_tensor ds4_gpu_tensor;
 int ds4_gpu_init(void);
 void ds4_gpu_cleanup(void);
 
+/* Backend diagnostics hook.  Routes a formatted line through the engine's
+ * installable log callback (see ds4_log_set in ds4.h).  Backend translation
+ * units (ds4_metal.m, ds4_cuda.cu) use this in place of fprintf(stderr, ...)
+ * so an embedder that installs a callback also captures kernel and runtime
+ * diagnostics.  The constants match the corresponding ds4_log_type values
+ * used by the default logger. */
+#define DS4_GPU_LOG_DEFAULT 0
+#define DS4_GPU_LOG_WARNING 5
+#define DS4_GPU_LOG_ERROR   8
+void ds4_gpu_log(int type, const char *fmt, ...);
+
 ds4_gpu_tensor *ds4_gpu_tensor_alloc(uint64_t bytes);
 ds4_gpu_tensor *ds4_gpu_tensor_alloc_managed(uint64_t bytes);
 ds4_gpu_tensor *ds4_gpu_tensor_view(const ds4_gpu_tensor *base, uint64_t offset, uint64_t bytes);

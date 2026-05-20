@@ -190,9 +190,9 @@ static void ds4_gpu_print_device_summary(void) {
     uint64_t mem = ds4_gpu_system_memory_bytes();
     if (mem) {
         double gib = (double)mem / 1024.0 / 1024.0 / 1024.0;
-        fprintf(stderr, "ds4: Metal device %s, %.2f GiB RAM\n", name, gib);
+        ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal device %s, %.2f GiB RAM\n", name, gib);
     } else {
-        fprintf(stderr, "ds4: Metal device %s\n", name);
+        ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal device %s\n", name);
     }
 }
 
@@ -274,7 +274,7 @@ static void ds4_gpu_close_batch_encoder(void) {
 static int ds4_gpu_wait_command_buffer(id<MTLCommandBuffer> cb, const char *label) {
     [cb waitUntilCompleted];
     if (cb.status == MTLCommandBufferStatusError) {
-        fprintf(stderr, "ds4: Metal %s failed: %s\n",
+        ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal %s failed: %s\n",
                 label, [[cb.error localizedDescription] UTF8String]);
         return 0;
     }
@@ -346,7 +346,7 @@ static int ds4_gpu_ensure_scratch_buffer(
         *buffer = [g_device newBufferWithLength:bytes options:MTLResourceStorageModeShared];
     }
     if (!*buffer) {
-        fprintf(stderr, "ds4: failed to allocate Metal scratch buffer %s (%llu bytes)\n",
+        ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: failed to allocate Metal scratch buffer %s (%llu bytes)\n",
                 label, (unsigned long long)bytes);
         *capacity = 0;
         return 0;
@@ -382,7 +382,7 @@ static int ds4_gpu_progress_enabled(void) {
 
 static void ds4_gpu_progress_begin(const char *what) {
     if (!ds4_gpu_progress_enabled()) return;
-    fprintf(stderr, "ds4: %s...", what);
+    ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: %s...", what);
     fflush(stderr);
 }
 
@@ -442,7 +442,7 @@ static int ds4_gpu_model_residency_request_views(void) {
         NSError *error = nil;
         g_model_residency_set = [g_device newResidencySetWithDescriptor:desc error:&error];
         if (!g_model_residency_set) {
-            fprintf(stderr, "ds4: Metal model residency set creation failed: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal model residency set creation failed: %s\n",
                     [[error localizedDescription] UTF8String]);
             return 0;
         }
@@ -470,11 +470,11 @@ static int ds4_gpu_map_model_views(
     const uintptr_t model_addr = (uintptr_t)model_map;
 
     if ((model_addr & (uintptr_t)(page - 1)) != 0) {
-        fprintf(stderr, "ds4: Metal model mmap base is not page aligned\n");
+        ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal model mmap base is not page aligned\n");
         return 0;
     }
     if (map_offset > model_size || map_size > model_size - map_offset) {
-        fprintf(stderr, "ds4: Metal model mapped range is outside the GGUF mapping\n");
+        ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal model mapped range is outside the GGUF mapping\n");
         return 0;
     }
     const uint64_t page_model_offset = map_offset & ~(page - 1);
@@ -520,7 +520,7 @@ static int ds4_gpu_map_model_views(
     }
     const uint64_t overlap = max_tensor_rounded + page;
     if (max_buffer == 0 || max_buffer <= overlap) {
-        fprintf(stderr,
+        ds4_gpu_log(DS4_GPU_LOG_DEFAULT,
                 "ds4: Metal maxBufferLength is too small for DS4 model views "
                 "(max tensor %.2f GiB, max buffer %.2f GiB)\n",
                 ds4_gpu_gib(max_tensor_bytes),
@@ -532,7 +532,7 @@ static int ds4_gpu_map_model_views(
     uint64_t off = 0;
     while (off < mapped_model_size) {
         if (g_model_view_count == DS4_METAL_MAX_MODEL_VIEWS) {
-            fprintf(stderr, "ds4: Metal model needs more mapped views than expected\n");
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal model needs more mapped views than expected\n");
             return 0;
         }
 
@@ -544,7 +544,7 @@ static int ds4_gpu_map_model_views(
                                                           options:MTLResourceStorageModeShared
                                                       deallocator:nil];
         if (!buffer) {
-            fprintf(stderr,
+            ds4_gpu_log(DS4_GPU_LOG_ERROR,
                     "ds4: Metal could not wrap mmaped model view at %.2f GiB, size %.2f GiB\n",
                     (double)off / (1024.0 * 1024.0 * 1024.0),
                     (double)view_bytes / (1024.0 * 1024.0 * 1024.0));
@@ -596,7 +596,7 @@ static int ds4_gpu_map_model_views(
         else ds4_gpu_progress_failed();
     }
     const double t_warm = ds4_gpu_now_ms();
-    fprintf(stderr,
+    ds4_gpu_log(DS4_GPU_LOG_DEFAULT,
             "ds4: Metal model views created in %.3f ms, residency requested in %.3f ms, warmup %.3f ms (mapped %.2f MiB from offset %.2f MiB)\n",
             t_mapped - t0,
             t_resident - t_mapped,
@@ -613,7 +613,7 @@ static id<MTLBuffer> ds4_gpu_new_transient_buffer(NSUInteger bytes, const char *
     id<MTLBuffer> buffer = [g_device newBufferWithLength:bytes
                                                  options:MTLResourceStorageModeShared];
     if (!buffer) {
-        fprintf(stderr, "ds4: failed to allocate Metal transient buffer %s (%llu bytes)\n",
+        ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: failed to allocate Metal transient buffer %s (%llu bytes)\n",
                 label ? label : "(unnamed)", (unsigned long long)bytes);
         return nil;
     }
@@ -647,7 +647,7 @@ static id<MTLComputePipelineState> ds4_gpu_get_mul_mm_pipeline(
                                          constantValues:constants
                                                   error:&error];
     if (!fn) {
-        fprintf(stderr, "ds4: Metal %s function not found: %s\n",
+        ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal %s function not found: %s\n",
                 function_name, [[error localizedDescription] UTF8String]);
         return nil;
     }
@@ -655,7 +655,7 @@ static id<MTLComputePipelineState> ds4_gpu_get_mul_mm_pipeline(
     error = nil;
     id<MTLComputePipelineState> pipeline = [g_device newComputePipelineStateWithFunction:fn error:&error];
     if (!pipeline) {
-        fprintf(stderr, "ds4: Metal %s pipeline failed: %s\n",
+        ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal %s pipeline failed: %s\n",
                 function_name, [[error localizedDescription] UTF8String]);
         return nil;
     }
@@ -681,7 +681,7 @@ static id<MTLComputePipelineState> ds4_gpu_get_mul_mm_id_pipeline(
                                          constantValues:constants
                                                   error:&error];
     if (!fn) {
-        fprintf(stderr, "ds4: Metal %s function not found: %s\n",
+        ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal %s function not found: %s\n",
                 function_name, [[error localizedDescription] UTF8String]);
         return nil;
     }
@@ -689,7 +689,7 @@ static id<MTLComputePipelineState> ds4_gpu_get_mul_mm_id_pipeline(
     error = nil;
     id<MTLComputePipelineState> pipeline = [g_device newComputePipelineStateWithFunction:fn error:&error];
     if (!pipeline) {
-        fprintf(stderr, "ds4: Metal %s pipeline failed: %s\n",
+        ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal %s pipeline failed: %s\n",
                 function_name, [[error localizedDescription] UTF8String]);
         return nil;
     }
@@ -708,13 +708,13 @@ static id<MTLComputePipelineState> ds4_gpu_get_pipeline(
     NSString *name = [NSString stringWithUTF8String:function_name];
     id<MTLFunction> fn = [g_library newFunctionWithName:name];
     if (!fn) {
-        fprintf(stderr, "ds4: Metal %s function not found\n", function_name);
+        ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal %s function not found\n", function_name);
         return nil;
     }
 
     id<MTLComputePipelineState> pipeline = [g_device newComputePipelineStateWithFunction:fn error:&error];
     if (!pipeline) {
-        fprintf(stderr, "ds4: Metal %s pipeline failed: %s\n",
+        ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal %s pipeline failed: %s\n",
                 function_name, [[error localizedDescription] UTF8String]);
         return nil;
     }
@@ -964,14 +964,14 @@ static int ds4_gpu_warm_model_views(void) {
     id<MTLBuffer> out = [g_device newBufferWithLength:out_bytes
                                              options:MTLResourceStorageModeShared];
     if (!out) {
-        fprintf(stderr, "ds4: Metal model warmup scratch allocation failed\n");
+        ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal model warmup scratch allocation failed\n");
         return 0;
     }
     out.label = @"ds4_model_warmup";
 
     id<MTLCommandBuffer> cb = [g_queue commandBuffer];
     if (!cb) {
-        fprintf(stderr, "ds4: Metal model warmup command buffer allocation failed\n");
+        ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal model warmup command buffer allocation failed\n");
         return 0;
     }
 
@@ -996,7 +996,7 @@ static int ds4_gpu_warm_model_views(void) {
     [cb waitUntilCompleted];
 
     if (cb.status == MTLCommandBufferStatusError) {
-        fprintf(stderr, "ds4: Metal model warmup failed: %s\n",
+        ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal model warmup failed: %s\n",
                 [[cb.error localizedDescription] UTF8String]);
         return 0;
     }
@@ -1035,7 +1035,7 @@ static id<MTLComputePipelineState> ds4_gpu_get_mul_mv_pipeline(
                                          constantValues:constants
                                                   error:&error];
     if (!fn) {
-        fprintf(stderr, "ds4: Metal %s function not found: %s\n",
+        ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal %s function not found: %s\n",
                 function_name, [[error localizedDescription] UTF8String]);
         return nil;
     }
@@ -1043,7 +1043,7 @@ static id<MTLComputePipelineState> ds4_gpu_get_mul_mv_pipeline(
     error = nil;
     id<MTLComputePipelineState> pipeline = [g_device newComputePipelineStateWithFunction:fn error:&error];
     if (!pipeline) {
-        fprintf(stderr, "ds4: Metal %s pipeline failed: %s\n",
+        ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal %s pipeline failed: %s\n",
                 function_name, [[error localizedDescription] UTF8String]);
         return nil;
     }
@@ -1071,7 +1071,7 @@ static id<MTLComputePipelineState> ds4_gpu_get_mul_mv_ext_pipeline(
                                          constantValues:constants
                                                   error:&error];
     if (!fn) {
-        fprintf(stderr, "ds4: Metal %s function not found: %s\n",
+        ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal %s function not found: %s\n",
                 function_name, [[error localizedDescription] UTF8String]);
         return nil;
     }
@@ -1079,7 +1079,7 @@ static id<MTLComputePipelineState> ds4_gpu_get_mul_mv_ext_pipeline(
     error = nil;
     id<MTLComputePipelineState> pipeline = [g_device newComputePipelineStateWithFunction:fn error:&error];
     if (!pipeline) {
-        fprintf(stderr, "ds4: Metal %s pipeline failed: %s\n",
+        ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal %s pipeline failed: %s\n",
                 function_name, [[error localizedDescription] UTF8String]);
         return nil;
     }
@@ -1105,7 +1105,7 @@ static id<MTLComputePipelineState> ds4_gpu_get_flash_attn_pad_pipeline(
                                          constantValues:constants
                                                   error:&error];
     if (!fn) {
-        fprintf(stderr, "ds4: Metal kernel_flash_attn_ext_pad function not found: %s\n",
+        ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal kernel_flash_attn_ext_pad function not found: %s\n",
                 [[error localizedDescription] UTF8String]);
         return nil;
     }
@@ -1113,7 +1113,7 @@ static id<MTLComputePipelineState> ds4_gpu_get_flash_attn_pad_pipeline(
     error = nil;
     id<MTLComputePipelineState> pipeline = [g_device newComputePipelineStateWithFunction:fn error:&error];
     if (!pipeline) {
-        fprintf(stderr, "ds4: Metal kernel_flash_attn_ext_pad pipeline failed: %s\n",
+        ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal kernel_flash_attn_ext_pad pipeline failed: %s\n",
                 [[error localizedDescription] UTF8String]);
         return nil;
     }
@@ -1139,7 +1139,7 @@ static id<MTLComputePipelineState> ds4_gpu_get_flash_attn_blk_pipeline(
                                          constantValues:constants
                                                   error:&error];
     if (!fn) {
-        fprintf(stderr, "ds4: Metal kernel_flash_attn_ext_blk function not found: %s\n",
+        ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal kernel_flash_attn_ext_blk function not found: %s\n",
                 [[error localizedDescription] UTF8String]);
         return nil;
     }
@@ -1147,7 +1147,7 @@ static id<MTLComputePipelineState> ds4_gpu_get_flash_attn_blk_pipeline(
     error = nil;
     id<MTLComputePipelineState> pipeline = [g_device newComputePipelineStateWithFunction:fn error:&error];
     if (!pipeline) {
-        fprintf(stderr, "ds4: Metal kernel_flash_attn_ext_blk pipeline failed: %s\n",
+        ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal kernel_flash_attn_ext_blk pipeline failed: %s\n",
                 [[error localizedDescription] UTF8String]);
         return nil;
     }
@@ -1198,7 +1198,7 @@ static id<MTLComputePipelineState> ds4_gpu_get_flash_attn_pipeline(
                                          constantValues:constants
                                                   error:&error];
     if (!fn) {
-        fprintf(stderr, "ds4: Metal %s function not found: %s\n",
+        ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal %s function not found: %s\n",
                 function_name, [[error localizedDescription] UTF8String]);
         return nil;
     }
@@ -1206,7 +1206,7 @@ static id<MTLComputePipelineState> ds4_gpu_get_flash_attn_pipeline(
     error = nil;
     id<MTLComputePipelineState> pipeline = [g_device newComputePipelineStateWithFunction:fn error:&error];
     if (!pipeline) {
-        fprintf(stderr, "ds4: Metal %s pipeline failed: %s\n",
+        ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal %s pipeline failed: %s\n",
                 function_name, [[error localizedDescription] UTF8String]);
         return nil;
     }
@@ -1257,7 +1257,7 @@ static id<MTLComputePipelineState> ds4_gpu_get_flash_attn_vec_pipeline(
                                          constantValues:constants
                                                   error:&error];
     if (!fn) {
-        fprintf(stderr, "ds4: Metal %s function not found: %s\n",
+        ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal %s function not found: %s\n",
                 function_name, [[error localizedDescription] UTF8String]);
         return nil;
     }
@@ -1265,7 +1265,7 @@ static id<MTLComputePipelineState> ds4_gpu_get_flash_attn_vec_pipeline(
     error = nil;
     id<MTLComputePipelineState> pipeline = [g_device newComputePipelineStateWithFunction:fn error:&error];
     if (!pipeline) {
-        fprintf(stderr, "ds4: Metal %s pipeline failed: %s\n",
+        ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal %s pipeline failed: %s\n",
                 function_name, [[error localizedDescription] UTF8String]);
         return nil;
     }
@@ -1291,7 +1291,7 @@ static id<MTLComputePipelineState> ds4_gpu_get_flash_attn_reduce_pipeline(
                                          constantValues:constants
                                                   error:&error];
     if (!fn) {
-        fprintf(stderr, "ds4: Metal kernel_flash_attn_ext_vec_reduce function not found: %s\n",
+        ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal kernel_flash_attn_ext_vec_reduce function not found: %s\n",
                 [[error localizedDescription] UTF8String]);
         return nil;
     }
@@ -1299,7 +1299,7 @@ static id<MTLComputePipelineState> ds4_gpu_get_flash_attn_reduce_pipeline(
     error = nil;
     id<MTLComputePipelineState> pipeline = [g_device newComputePipelineStateWithFunction:fn error:&error];
     if (!pipeline) {
-        fprintf(stderr, "ds4: Metal kernel_flash_attn_ext_vec_reduce pipeline failed: %s\n",
+        ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal kernel_flash_attn_ext_vec_reduce pipeline failed: %s\n",
                 [[error localizedDescription] UTF8String]);
         return nil;
     }
@@ -1361,23 +1361,23 @@ void ds4_gpu_print_memory_report(const char *label) {
         (uint64_t)g_moe_down_scratch_bytes +
         (uint64_t)g_moe_id_map_bytes;
 
-    fprintf(stderr, "ds4: Metal memory report%s%s\n",
+    ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal memory report%s%s\n",
             label && label[0] ? " " : "",
             label && label[0] ? label : "");
-    fprintf(stderr,
+    ds4_gpu_log(DS4_GPU_LOG_DEFAULT,
             "ds4:   runtime tensors live %.2f MiB peak %.2f MiB\n",
             ds4_gpu_mib(g_tensor_alloc_live_bytes),
             ds4_gpu_mib(g_tensor_alloc_peak_bytes));
-    fprintf(stderr,
+    ds4_gpu_log(DS4_GPU_LOG_DEFAULT,
             "ds4:   mmap model wrapper spans %llu buffers %.2f GiB total, %.2f GiB max (not copied)\n",
             (unsigned long long)g_model_wrap_count,
             ds4_gpu_gib(g_model_wrap_bytes),
             ds4_gpu_gib(g_model_wrap_max_bytes));
-    fprintf(stderr,
+    ds4_gpu_log(DS4_GPU_LOG_DEFAULT,
             "ds4:   model residency requests %llu%s\n",
             (unsigned long long)g_model_residency_count,
             getenv("DS4_METAL_NO_RESIDENCY") != NULL ? " (disabled)" : "");
-    fprintf(stderr,
+    ds4_gpu_log(DS4_GPU_LOG_DEFAULT,
             "ds4:   device %s, Metal 4 runtime %s, family %s, MTL4 queue %s, tensor API %s, M5 neural accelerators %s\n",
             g_metal_device_name[0] ? g_metal_device_name : "(unknown)",
             g_metal4_runtime_available ? "yes" : "no",
@@ -1386,12 +1386,12 @@ void ds4_gpu_print_memory_report(const char *label) {
             g_metal4_tensor_api_enabled ? "enabled" :
                 (g_metal4_tensor_api_compile_supported ? "available" : "disabled"),
             g_metal4_m5_neural_accelerators_hint ? "likely" : "not detected");
-    fprintf(stderr,
+    ds4_gpu_log(DS4_GPU_LOG_DEFAULT,
             "ds4:   accelerated Metal path %s%s\n",
             ds4_gpu_mpp_available() ? "enabled" : "disabled",
             g_quality_mode ? " by --quality" :
                 (!g_metal4_tensor_api_enabled ? " (tensor API unavailable)" : ""));
-    fprintf(stderr,
+    ds4_gpu_log(DS4_GPU_LOG_DEFAULT,
             "ds4:   scratch %.2f MiB (flash mask %.2f, pad %.2f, tmp %.2f, blk %.2f, ring %.2f, kv %.2f, compressor %.2f, router %.2f, indexer %.2f, moe %.2f, f16 %.2f, raw-store %.2f)\n",
             ds4_gpu_mib(scratch),
             ds4_gpu_mib((uint64_t)g_flash_attn_mask_bytes),
@@ -1488,7 +1488,7 @@ static NSString *ds4_gpu_full_source(void) {
         NSString *path = [NSString stringWithUTF8String:ds4_metal_embedded_sources[i].path];
         NSString *loaded = [NSString stringWithUTF8String:ds4_metal_embedded_sources[i].source];
         if (!path || !loaded) {
-            fprintf(stderr, "ds4: embedded Metal source %zu is invalid\n", i);
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: embedded Metal source %zu is invalid\n", i);
             return nil;
         }
         [source appendFormat:@"\n// appended %@\n%@\n", path, loaded];
@@ -2656,7 +2656,7 @@ static int ds4_gpu_encode_rope_tail_inplace(
     if (n_tok > (uint32_t)(sizeof(pos_stack) / sizeof(pos_stack[0]))) {
         pos = malloc((size_t)n_tok * sizeof(*pos));
         if (!pos) {
-            fprintf(stderr, "ds4: failed to allocate Metal RoPE position buffer\n");
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: failed to allocate Metal RoPE position buffer\n");
             return 0;
         }
     }
@@ -2932,7 +2932,7 @@ int ds4_gpu_init(void) {
     @autoreleasepool {
         g_device = MTLCreateSystemDefaultDevice();
         if (!g_device) {
-            fprintf(stderr, "ds4: Metal device not available\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal device not available\n");
             return 0;
         }
         ds4_gpu_print_device_summary();
@@ -2940,7 +2940,7 @@ int ds4_gpu_init(void) {
 
         g_queue = [g_device newCommandQueue];
         if (!g_queue) {
-            fprintf(stderr, "ds4: failed to create Metal command queue\n");
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: failed to create Metal command queue\n");
             g_device = nil;
             return 0;
         }
@@ -2949,7 +2949,7 @@ int ds4_gpu_init(void) {
         g_transient_buffers = [NSMutableArray array];
         g_pending_cbs = [NSMutableArray array];
         if (!g_model_buffer_cache || !g_pipeline_cache || !g_transient_buffers || !g_pending_cbs) {
-            fprintf(stderr, "ds4: Metal bookkeeping allocation failed\n");
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal bookkeeping allocation failed\n");
             g_pending_cbs = nil;
             g_transient_buffers = nil;
             g_pipeline_cache = nil;
@@ -3015,7 +3015,7 @@ int ds4_gpu_init(void) {
         options.preprocessorMacros = macros;
         id<MTLLibrary> library = [g_device newLibraryWithSource:source options:options error:&error];
         if (!library) {
-            fprintf(stderr, "ds4: Metal shader compilation failed: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal shader compilation failed: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3025,7 +3025,7 @@ int ds4_gpu_init(void) {
 
         id<MTLFunction> fn = [library newFunctionWithName:@"kernel_get_rows_f32"];
         if (!fn) {
-            fprintf(stderr, "ds4: Metal kernel_get_rows_f32 function not found\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal kernel_get_rows_f32 function not found\n");
             g_queue = nil;
             g_device = nil;
             return 0;
@@ -3033,7 +3033,7 @@ int ds4_gpu_init(void) {
 
         g_get_rows_f32_pipeline = [g_device newComputePipelineStateWithFunction:fn error:&error];
         if (!g_get_rows_f32_pipeline) {
-            fprintf(stderr, "ds4: Metal kernel_get_rows_f32 pipeline failed: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal kernel_get_rows_f32 pipeline failed: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3042,7 +3042,7 @@ int ds4_gpu_init(void) {
 
         fn = [library newFunctionWithName:@"kernel_get_rows_f16"];
         if (!fn) {
-            fprintf(stderr, "ds4: Metal kernel_get_rows_f16 function not found\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal kernel_get_rows_f16 function not found\n");
             g_queue = nil;
             g_device = nil;
             return 0;
@@ -3050,7 +3050,7 @@ int ds4_gpu_init(void) {
 
         g_get_rows_f16_pipeline = [g_device newComputePipelineStateWithFunction:fn error:&error];
         if (!g_get_rows_f16_pipeline) {
-            fprintf(stderr, "ds4: Metal kernel_get_rows_f16 pipeline failed: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal kernel_get_rows_f16 pipeline failed: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3059,7 +3059,7 @@ int ds4_gpu_init(void) {
 
         fn = [library newFunctionWithName:@"kernel_get_rows_i32"];
         if (!fn) {
-            fprintf(stderr, "ds4: Metal kernel_get_rows_i32 function not found\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal kernel_get_rows_i32 function not found\n");
             g_queue = nil;
             g_device = nil;
             return 0;
@@ -3067,7 +3067,7 @@ int ds4_gpu_init(void) {
 
         g_get_rows_i32_pipeline = [g_device newComputePipelineStateWithFunction:fn error:&error];
         if (!g_get_rows_i32_pipeline) {
-            fprintf(stderr, "ds4: Metal kernel_get_rows_i32 pipeline failed: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal kernel_get_rows_i32 pipeline failed: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3076,7 +3076,7 @@ int ds4_gpu_init(void) {
 
         fn = [library newFunctionWithName:@"kernel_repeat_f32"];
         if (!fn) {
-            fprintf(stderr, "ds4: Metal kernel_repeat_f32 function not found\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal kernel_repeat_f32 function not found\n");
             g_queue = nil;
             g_device = nil;
             return 0;
@@ -3084,7 +3084,7 @@ int ds4_gpu_init(void) {
 
         g_repeat_f32_pipeline = [g_device newComputePipelineStateWithFunction:fn error:&error];
         if (!g_repeat_f32_pipeline) {
-            fprintf(stderr, "ds4: Metal kernel_repeat_f32 pipeline failed: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal kernel_repeat_f32 pipeline failed: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3093,7 +3093,7 @@ int ds4_gpu_init(void) {
 
         fn = [library newFunctionWithName:@"kernel_set_rows_f32_i32"];
         if (!fn) {
-            fprintf(stderr, "ds4: Metal kernel_set_rows_f32_i32 function not found\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal kernel_set_rows_f32_i32 function not found\n");
             g_queue = nil;
             g_device = nil;
             return 0;
@@ -3101,7 +3101,7 @@ int ds4_gpu_init(void) {
 
         g_set_rows_f32_i32_pipeline = [g_device newComputePipelineStateWithFunction:fn error:&error];
         if (!g_set_rows_f32_i32_pipeline) {
-            fprintf(stderr, "ds4: Metal kernel_set_rows_f32_i32 pipeline failed: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal kernel_set_rows_f32_i32 pipeline failed: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3110,7 +3110,7 @@ int ds4_gpu_init(void) {
 
         fn = [library newFunctionWithName:@"kernel_concat"];
         if (!fn) {
-            fprintf(stderr, "ds4: Metal kernel_concat function not found\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal kernel_concat function not found\n");
             g_queue = nil;
             g_device = nil;
             return 0;
@@ -3118,7 +3118,7 @@ int ds4_gpu_init(void) {
 
         g_concat_pipeline = [g_device newComputePipelineStateWithFunction:fn error:&error];
         if (!g_concat_pipeline) {
-            fprintf(stderr, "ds4: Metal kernel_concat pipeline failed: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal kernel_concat pipeline failed: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3127,7 +3127,7 @@ int ds4_gpu_init(void) {
 
         fn = [library newFunctionWithName:@"kernel_cpy_f32_f32"];
         if (!fn) {
-            fprintf(stderr, "ds4: Metal kernel_cpy_f32_f32 function not found\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal kernel_cpy_f32_f32 function not found\n");
             g_queue = nil;
             g_device = nil;
             return 0;
@@ -3135,7 +3135,7 @@ int ds4_gpu_init(void) {
 
         g_cpy_f32_f32_pipeline = [g_device newComputePipelineStateWithFunction:fn error:&error];
         if (!g_cpy_f32_f32_pipeline) {
-            fprintf(stderr, "ds4: Metal kernel_cpy_f32_f32 pipeline failed: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal kernel_cpy_f32_f32 pipeline failed: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3144,7 +3144,7 @@ int ds4_gpu_init(void) {
 
         fn = [library newFunctionWithName:@"kernel_cpy_f32_f16"];
         if (!fn) {
-            fprintf(stderr, "ds4: Metal kernel_cpy_f32_f16 function not found\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal kernel_cpy_f32_f16 function not found\n");
             g_queue = nil;
             g_device = nil;
             return 0;
@@ -3152,7 +3152,7 @@ int ds4_gpu_init(void) {
 
         g_cpy_f32_f16_pipeline = [g_device newComputePipelineStateWithFunction:fn error:&error];
         if (!g_cpy_f32_f16_pipeline) {
-            fprintf(stderr, "ds4: Metal kernel_cpy_f32_f16 pipeline failed: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal kernel_cpy_f32_f16 pipeline failed: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3161,7 +3161,7 @@ int ds4_gpu_init(void) {
 
         fn = [library newFunctionWithName:@"kernel_cpy_f16_f32"];
         if (!fn) {
-            fprintf(stderr, "ds4: Metal kernel_cpy_f16_f32 function not found\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal kernel_cpy_f16_f32 function not found\n");
             g_queue = nil;
             g_device = nil;
             return 0;
@@ -3169,7 +3169,7 @@ int ds4_gpu_init(void) {
 
         g_cpy_f16_f32_pipeline = [g_device newComputePipelineStateWithFunction:fn error:&error];
         if (!g_cpy_f16_f32_pipeline) {
-            fprintf(stderr, "ds4: Metal kernel_cpy_f16_f32 pipeline failed: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal kernel_cpy_f16_f32 pipeline failed: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3178,14 +3178,14 @@ int ds4_gpu_init(void) {
 
         fn = [library newFunctionWithName:@"kernel_dsv4_fp8_kv_quantize_f32"];
         if (!fn) {
-            fprintf(stderr, "ds4: Metal kernel_dsv4_fp8_kv_quantize_f32 function not found\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal kernel_dsv4_fp8_kv_quantize_f32 function not found\n");
             g_queue = nil;
             g_device = nil;
             return 0;
         }
         g_dsv4_fp8_kv_quantize_pipeline = [g_device newComputePipelineStateWithFunction:fn error:&error];
         if (!g_dsv4_fp8_kv_quantize_pipeline) {
-            fprintf(stderr, "ds4: Metal kernel_dsv4_fp8_kv_quantize_f32 pipeline failed: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal kernel_dsv4_fp8_kv_quantize_f32 pipeline failed: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3194,14 +3194,14 @@ int ds4_gpu_init(void) {
 
         fn = [library newFunctionWithName:@"kernel_dsv4_indexer_hadamard_fp4_f32"];
         if (!fn) {
-            fprintf(stderr, "ds4: Metal kernel_dsv4_indexer_hadamard_fp4_f32 function not found\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal kernel_dsv4_indexer_hadamard_fp4_f32 function not found\n");
             g_queue = nil;
             g_device = nil;
             return 0;
         }
         g_dsv4_indexer_qat_pipeline = [g_device newComputePipelineStateWithFunction:fn error:&error];
         if (!g_dsv4_indexer_qat_pipeline) {
-            fprintf(stderr, "ds4: Metal kernel_dsv4_indexer_hadamard_fp4_f32 pipeline failed: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal kernel_dsv4_indexer_hadamard_fp4_f32 pipeline failed: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3210,14 +3210,14 @@ int ds4_gpu_init(void) {
 
         fn = [library newFunctionWithName:@"kernel_dsv4_kv_fp8_store_f32"];
         if (!fn) {
-            fprintf(stderr, "ds4: Metal kernel_dsv4_kv_fp8_store_f32 function not found\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal kernel_dsv4_kv_fp8_store_f32 function not found\n");
             g_queue = nil;
             g_device = nil;
             return 0;
         }
         g_dsv4_kv_fp8_store_pipeline = [g_device newComputePipelineStateWithFunction:fn error:&error];
         if (!g_dsv4_kv_fp8_store_pipeline) {
-            fprintf(stderr, "ds4: Metal kernel_dsv4_kv_fp8_store_f32 pipeline failed: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal kernel_dsv4_kv_fp8_store_f32 pipeline failed: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3226,14 +3226,14 @@ int ds4_gpu_init(void) {
 
         fn = [library newFunctionWithName:@"kernel_dsv4_ratio4_shift_f32"];
         if (!fn) {
-            fprintf(stderr, "ds4: Metal kernel_dsv4_ratio4_shift_f32 function not found\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal kernel_dsv4_ratio4_shift_f32 function not found\n");
             g_queue = nil;
             g_device = nil;
             return 0;
         }
         g_dsv4_ratio4_shift_pipeline = [g_device newComputePipelineStateWithFunction:fn error:&error];
         if (!g_dsv4_ratio4_shift_pipeline) {
-            fprintf(stderr, "ds4: Metal kernel_dsv4_ratio4_shift_f32 pipeline failed: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal kernel_dsv4_ratio4_shift_f32 pipeline failed: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3242,7 +3242,7 @@ int ds4_gpu_init(void) {
 
         fn = [library newFunctionWithName:@"kernel_swiglu_f32"];
         if (!fn) {
-            fprintf(stderr, "ds4: Metal kernel_swiglu_f32 function not found\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal kernel_swiglu_f32 function not found\n");
             g_queue = nil;
             g_device = nil;
             return 0;
@@ -3250,7 +3250,7 @@ int ds4_gpu_init(void) {
 
         g_swiglu_pipeline = [g_device newComputePipelineStateWithFunction:fn error:&error];
         if (!g_swiglu_pipeline) {
-            fprintf(stderr, "ds4: Metal kernel_swiglu_f32 pipeline failed: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal kernel_swiglu_f32 pipeline failed: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3289,7 +3289,7 @@ int ds4_gpu_init(void) {
                            constantValues:bin_constants
                                     error:&error];
         if (!fn) {
-            fprintf(stderr, "ds4: Metal kernel_bin_fuse_f32_f32_f32 function not found: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal kernel_bin_fuse_f32_f32_f32 function not found: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3298,7 +3298,7 @@ int ds4_gpu_init(void) {
 
         g_add_pipeline = [g_device newComputePipelineStateWithFunction:fn error:&error];
         if (!g_add_pipeline) {
-            fprintf(stderr, "ds4: Metal kernel_bin_fuse_f32_f32_f32 pipeline failed: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal kernel_bin_fuse_f32_f32_f32 pipeline failed: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3320,7 +3320,7 @@ int ds4_gpu_init(void) {
                            constantValues:bin_mul_constants
                                     error:&error];
         if (!fn) {
-            fprintf(stderr, "ds4: Metal kernel_bin_fuse_f32_f32_f32 mul function not found: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal kernel_bin_fuse_f32_f32_f32 mul function not found: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3329,7 +3329,7 @@ int ds4_gpu_init(void) {
 
         g_mul_pipeline = [g_device newComputePipelineStateWithFunction:fn error:&error];
         if (!g_mul_pipeline) {
-            fprintf(stderr, "ds4: Metal kernel_bin_fuse_f32_f32_f32 mul pipeline failed: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal kernel_bin_fuse_f32_f32_f32 mul pipeline failed: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3351,7 +3351,7 @@ int ds4_gpu_init(void) {
                            constantValues:bin_mul_scalar_constants
                                     error:&error];
         if (!fn) {
-            fprintf(stderr, "ds4: Metal kernel_bin_fuse_f32_f32_f32 mul-scalar function not found: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal kernel_bin_fuse_f32_f32_f32 mul-scalar function not found: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3360,7 +3360,7 @@ int ds4_gpu_init(void) {
 
         g_bin_mul_scalar_pipeline = [g_device newComputePipelineStateWithFunction:fn error:&error];
         if (!g_bin_mul_scalar_pipeline) {
-            fprintf(stderr, "ds4: Metal kernel_bin_fuse_f32_f32_f32 mul-scalar pipeline failed: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal kernel_bin_fuse_f32_f32_f32 mul-scalar pipeline failed: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3382,7 +3382,7 @@ int ds4_gpu_init(void) {
                            constantValues:bin_div_row_constants
                                     error:&error];
         if (!fn) {
-            fprintf(stderr, "ds4: Metal kernel_bin_fuse_f32_f32_f32 div-row function not found: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal kernel_bin_fuse_f32_f32_f32 div-row function not found: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3391,7 +3391,7 @@ int ds4_gpu_init(void) {
 
         g_bin_div_row_pipeline = [g_device newComputePipelineStateWithFunction:fn error:&error];
         if (!g_bin_div_row_pipeline) {
-            fprintf(stderr, "ds4: Metal kernel_bin_fuse_f32_f32_f32 div-row pipeline failed: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal kernel_bin_fuse_f32_f32_f32 div-row pipeline failed: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3400,14 +3400,14 @@ int ds4_gpu_init(void) {
 
         fn = [library newFunctionWithName:@"kernel_rms_norm_mul_f32_4"];
         if (!fn) {
-            fprintf(stderr, "ds4: Metal kernel_rms_norm_mul_f32_4 function not found\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal kernel_rms_norm_mul_f32_4 function not found\n");
             g_queue = nil;
             g_device = nil;
             return 0;
         }
         g_rms_norm_pipeline = [g_device newComputePipelineStateWithFunction:fn error:&error];
         if (!g_rms_norm_pipeline) {
-            fprintf(stderr, "ds4: Metal kernel_rms_norm_mul_f32_4 pipeline failed: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal kernel_rms_norm_mul_f32_4 pipeline failed: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3416,14 +3416,14 @@ int ds4_gpu_init(void) {
 
         fn = [library newFunctionWithName:@"kernel_rms_norm_f32_4"];
         if (!fn) {
-            fprintf(stderr, "ds4: Metal kernel_rms_norm_f32_4 function not found\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal kernel_rms_norm_f32_4 function not found\n");
             g_queue = nil;
             g_device = nil;
             return 0;
         }
         g_rms_norm_plain_pipeline = [g_device newComputePipelineStateWithFunction:fn error:&error];
         if (!g_rms_norm_plain_pipeline) {
-            fprintf(stderr, "ds4: Metal kernel_rms_norm_f32_4 pipeline failed: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal kernel_rms_norm_f32_4 pipeline failed: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3432,14 +3432,14 @@ int ds4_gpu_init(void) {
 
         fn = [library newFunctionWithName:@"kernel_dsv4_qkv_rms_norm_f32_4"];
         if (!fn) {
-            fprintf(stderr, "ds4: Metal kernel_dsv4_qkv_rms_norm_f32_4 function not found\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal kernel_dsv4_qkv_rms_norm_f32_4 function not found\n");
             g_queue = nil;
             g_device = nil;
             return 0;
         }
         g_dsv4_qkv_rms_norm_pipeline = [g_device newComputePipelineStateWithFunction:fn error:&error];
         if (!g_dsv4_qkv_rms_norm_pipeline) {
-            fprintf(stderr, "ds4: Metal kernel_dsv4_qkv_rms_norm_f32_4 pipeline failed: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal kernel_dsv4_qkv_rms_norm_f32_4 pipeline failed: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3455,7 +3455,7 @@ int ds4_gpu_init(void) {
                            constantValues:moe_mv_id_constants
                                     error:&error];
         if (!fn) {
-            fprintf(stderr, "ds4: Metal kernel_mul_mv_id_iq2_xxs_f32 function not found: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal kernel_mul_mv_id_iq2_xxs_f32 function not found: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3463,7 +3463,7 @@ int ds4_gpu_init(void) {
         }
         g_moe_mul_mv_id_iq2_xxs_pipeline = [g_device newComputePipelineStateWithFunction:fn error:&error];
         if (!g_moe_mul_mv_id_iq2_xxs_pipeline) {
-            fprintf(stderr, "ds4: Metal kernel_mul_mv_id_iq2_xxs_f32 pipeline failed: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal kernel_mul_mv_id_iq2_xxs_f32 pipeline failed: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3475,7 +3475,7 @@ int ds4_gpu_init(void) {
                            constantValues:moe_mv_id_constants
                                     error:&error];
         if (!fn) {
-            fprintf(stderr, "ds4: Metal kernel_mul_mv_id_iq2_xxs_pair_f32 function not found: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal kernel_mul_mv_id_iq2_xxs_pair_f32 function not found: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3483,7 +3483,7 @@ int ds4_gpu_init(void) {
         }
         g_moe_mul_mv_id_iq2_xxs_pair_pipeline = [g_device newComputePipelineStateWithFunction:fn error:&error];
         if (!g_moe_mul_mv_id_iq2_xxs_pair_pipeline) {
-            fprintf(stderr, "ds4: Metal kernel_mul_mv_id_iq2_xxs_pair_f32 pipeline failed: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal kernel_mul_mv_id_iq2_xxs_pair_f32 pipeline failed: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3495,7 +3495,7 @@ int ds4_gpu_init(void) {
                            constantValues:moe_mv_id_constants
                                     error:&error];
         if (!fn) {
-            fprintf(stderr, "ds4: Metal kernel_mul_mv_id_iq2_xxs_pair_swiglu_f32 function not found: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal kernel_mul_mv_id_iq2_xxs_pair_swiglu_f32 function not found: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3503,7 +3503,7 @@ int ds4_gpu_init(void) {
         }
         g_moe_mul_mv_id_iq2_xxs_pair_swiglu_pipeline = [g_device newComputePipelineStateWithFunction:fn error:&error];
         if (!g_moe_mul_mv_id_iq2_xxs_pair_swiglu_pipeline) {
-            fprintf(stderr, "ds4: Metal kernel_mul_mv_id_iq2_xxs_pair_swiglu_f32 pipeline failed: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal kernel_mul_mv_id_iq2_xxs_pair_swiglu_f32 pipeline failed: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3515,7 +3515,7 @@ int ds4_gpu_init(void) {
                            constantValues:moe_mv_id_constants
                                     error:&error];
         if (!fn) {
-            fprintf(stderr, "ds4: Metal kernel_mul_mv_id_q2_K_f32 function not found: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal kernel_mul_mv_id_q2_K_f32 function not found: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3523,7 +3523,7 @@ int ds4_gpu_init(void) {
         }
         g_moe_mul_mv_id_q2_k_pipeline = [g_device newComputePipelineStateWithFunction:fn error:&error];
         if (!g_moe_mul_mv_id_q2_k_pipeline) {
-            fprintf(stderr, "ds4: Metal kernel_mul_mv_id_q2_K_f32 pipeline failed: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal kernel_mul_mv_id_q2_K_f32 pipeline failed: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3535,7 +3535,7 @@ int ds4_gpu_init(void) {
                            constantValues:moe_mv_id_constants
                                     error:&error];
         if (!fn) {
-            fprintf(stderr, "ds4: Metal kernel_mul_mv_id_q2_K_sum6_f32 function not found: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal kernel_mul_mv_id_q2_K_sum6_f32 function not found: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3543,7 +3543,7 @@ int ds4_gpu_init(void) {
         }
         g_moe_mul_mv_id_q2_k_sum6_pipeline = [g_device newComputePipelineStateWithFunction:fn error:&error];
         if (!g_moe_mul_mv_id_q2_k_sum6_pipeline) {
-            fprintf(stderr, "ds4: Metal kernel_mul_mv_id_q2_K_sum6_f32 pipeline failed: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal kernel_mul_mv_id_q2_K_sum6_f32 pipeline failed: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3555,7 +3555,7 @@ int ds4_gpu_init(void) {
                            constantValues:moe_mv_id_constants
                                     error:&error];
         if (!fn) {
-            fprintf(stderr, "ds4: Metal kernel_mul_mv_id_q4_K_f32 function not found: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal kernel_mul_mv_id_q4_K_f32 function not found: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3563,7 +3563,7 @@ int ds4_gpu_init(void) {
         }
         g_moe_mul_mv_id_q4_k_pipeline = [g_device newComputePipelineStateWithFunction:fn error:&error];
         if (!g_moe_mul_mv_id_q4_k_pipeline) {
-            fprintf(stderr, "ds4: Metal kernel_mul_mv_id_q4_K_f32 pipeline failed: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal kernel_mul_mv_id_q4_K_f32 pipeline failed: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3575,7 +3575,7 @@ int ds4_gpu_init(void) {
                            constantValues:moe_mv_id_constants
                                     error:&error];
         if (!fn) {
-            fprintf(stderr, "ds4: Metal kernel_mul_mv_id_q4_K_pair_f32 function not found: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal kernel_mul_mv_id_q4_K_pair_f32 function not found: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3583,7 +3583,7 @@ int ds4_gpu_init(void) {
         }
         g_moe_mul_mv_id_q4_k_pair_pipeline = [g_device newComputePipelineStateWithFunction:fn error:&error];
         if (!g_moe_mul_mv_id_q4_k_pair_pipeline) {
-            fprintf(stderr, "ds4: Metal kernel_mul_mv_id_q4_K_pair_f32 pipeline failed: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal kernel_mul_mv_id_q4_K_pair_f32 pipeline failed: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3595,7 +3595,7 @@ int ds4_gpu_init(void) {
                            constantValues:moe_mv_id_constants
                                     error:&error];
         if (!fn) {
-            fprintf(stderr, "ds4: Metal kernel_mul_mv_id_q4_K_pair_swiglu_f32 function not found: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal kernel_mul_mv_id_q4_K_pair_swiglu_f32 function not found: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3603,7 +3603,7 @@ int ds4_gpu_init(void) {
         }
         g_moe_mul_mv_id_q4_k_pair_swiglu_pipeline = [g_device newComputePipelineStateWithFunction:fn error:&error];
         if (!g_moe_mul_mv_id_q4_k_pair_swiglu_pipeline) {
-            fprintf(stderr, "ds4: Metal kernel_mul_mv_id_q4_K_pair_swiglu_f32 pipeline failed: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal kernel_mul_mv_id_q4_K_pair_swiglu_f32 pipeline failed: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3615,7 +3615,7 @@ int ds4_gpu_init(void) {
                            constantValues:moe_mv_id_constants
                                     error:&error];
         if (!fn) {
-            fprintf(stderr, "ds4: Metal kernel_mul_mv_id_q4_K_sum6_f32 function not found: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal kernel_mul_mv_id_q4_K_sum6_f32 function not found: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3623,7 +3623,7 @@ int ds4_gpu_init(void) {
         }
         g_moe_mul_mv_id_q4_k_sum6_pipeline = [g_device newComputePipelineStateWithFunction:fn error:&error];
         if (!g_moe_mul_mv_id_q4_k_sum6_pipeline) {
-            fprintf(stderr, "ds4: Metal kernel_mul_mv_id_q4_K_sum6_f32 pipeline failed: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal kernel_mul_mv_id_q4_K_sum6_f32 pipeline failed: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3632,14 +3632,14 @@ int ds4_gpu_init(void) {
 
         fn = [library newFunctionWithName:@"kernel_dsv4_rope_tail_f32"];
         if (!fn) {
-            fprintf(stderr, "ds4: Metal kernel_dsv4_rope_tail_f32 function not found\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal kernel_dsv4_rope_tail_f32 function not found\n");
             g_queue = nil;
             g_device = nil;
             return 0;
         }
         g_rope_tail_batch_pipeline = [g_device newComputePipelineStateWithFunction:fn error:&error];
         if (!g_rope_tail_batch_pipeline) {
-            fprintf(stderr, "ds4: Metal kernel_dsv4_rope_tail_f32 pipeline failed: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal kernel_dsv4_rope_tail_f32 pipeline failed: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3648,14 +3648,14 @@ int ds4_gpu_init(void) {
 
         fn = [library newFunctionWithName:@"kernel_dsv4_softmax_pool"];
         if (!fn) {
-            fprintf(stderr, "ds4: Metal kernel_dsv4_softmax_pool function not found\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal kernel_dsv4_softmax_pool function not found\n");
             g_queue = nil;
             g_device = nil;
             return 0;
         }
         g_dsv4_softmax_pool_pipeline = [g_device newComputePipelineStateWithFunction:fn error:&error];
         if (!g_dsv4_softmax_pool_pipeline) {
-            fprintf(stderr, "ds4: Metal kernel_dsv4_softmax_pool pipeline failed: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal kernel_dsv4_softmax_pool pipeline failed: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3664,14 +3664,14 @@ int ds4_gpu_init(void) {
 
         fn = [library newFunctionWithName:@"kernel_soft_max_f32"];
         if (!fn) {
-            fprintf(stderr, "ds4: Metal kernel_soft_max_f32 function not found\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal kernel_soft_max_f32 function not found\n");
             g_queue = nil;
             g_device = nil;
             return 0;
         }
         g_soft_max_f32_pipeline = [g_device newComputePipelineStateWithFunction:fn error:&error];
         if (!g_soft_max_f32_pipeline) {
-            fprintf(stderr, "ds4: Metal kernel_soft_max_f32 pipeline failed: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal kernel_soft_max_f32 pipeline failed: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3680,14 +3680,14 @@ int ds4_gpu_init(void) {
 
         fn = [library newFunctionWithName:@"kernel_soft_max_f32_4"];
         if (!fn) {
-            fprintf(stderr, "ds4: Metal kernel_soft_max_f32_4 function not found\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal kernel_soft_max_f32_4 function not found\n");
             g_queue = nil;
             g_device = nil;
             return 0;
         }
         g_soft_max_f32_4_pipeline = [g_device newComputePipelineStateWithFunction:fn error:&error];
         if (!g_soft_max_f32_4_pipeline) {
-            fprintf(stderr, "ds4: Metal kernel_soft_max_f32_4 pipeline failed: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal kernel_soft_max_f32_4 pipeline failed: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3696,14 +3696,14 @@ int ds4_gpu_init(void) {
 
         fn = [library newFunctionWithName:@"kernel_argsort_f32_i32_desc"];
         if (!fn) {
-            fprintf(stderr, "ds4: Metal kernel_argsort_f32_i32_desc function not found\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal kernel_argsort_f32_i32_desc function not found\n");
             g_queue = nil;
             g_device = nil;
             return 0;
         }
         g_argsort_f32_i32_desc_pipeline = [g_device newComputePipelineStateWithFunction:fn error:&error];
         if (!g_argsort_f32_i32_desc_pipeline) {
-            fprintf(stderr, "ds4: Metal kernel_argsort_f32_i32_desc pipeline failed: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal kernel_argsort_f32_i32_desc pipeline failed: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3712,14 +3712,14 @@ int ds4_gpu_init(void) {
 
         fn = [library newFunctionWithName:@"kernel_argsort_merge_f32_i32_desc"];
         if (!fn) {
-            fprintf(stderr, "ds4: Metal kernel_argsort_merge_f32_i32_desc function not found\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal kernel_argsort_merge_f32_i32_desc function not found\n");
             g_queue = nil;
             g_device = nil;
             return 0;
         }
         g_argsort_merge_f32_i32_desc_pipeline = [g_device newComputePipelineStateWithFunction:fn error:&error];
         if (!g_argsort_merge_f32_i32_desc_pipeline) {
-            fprintf(stderr, "ds4: Metal kernel_argsort_merge_f32_i32_desc pipeline failed: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal kernel_argsort_merge_f32_i32_desc pipeline failed: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3735,7 +3735,7 @@ int ds4_gpu_init(void) {
                            constantValues:sum_rows_constants
                                     error:&error];
         if (!fn) {
-            fprintf(stderr, "ds4: Metal kernel_sum_rows_f32_f32 function not found: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal kernel_sum_rows_f32_f32 function not found: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3743,7 +3743,7 @@ int ds4_gpu_init(void) {
         }
         g_sum_rows_f32_f32_pipeline = [g_device newComputePipelineStateWithFunction:fn error:&error];
         if (!g_sum_rows_f32_f32_pipeline) {
-            fprintf(stderr, "ds4: Metal kernel_sum_rows_f32_f32 pipeline failed: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal kernel_sum_rows_f32_f32 pipeline failed: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3752,14 +3752,14 @@ int ds4_gpu_init(void) {
 
         fn = [library newFunctionWithName:@"kernel_dsv4_topk_mask"];
         if (!fn) {
-            fprintf(stderr, "ds4: Metal kernel_dsv4_topk_mask function not found\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal kernel_dsv4_topk_mask function not found\n");
             g_queue = nil;
             g_device = nil;
             return 0;
         }
         g_dsv4_topk_mask_pipeline = [g_device newComputePipelineStateWithFunction:fn error:&error];
         if (!g_dsv4_topk_mask_pipeline) {
-            fprintf(stderr, "ds4: Metal kernel_dsv4_topk_mask pipeline failed: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal kernel_dsv4_topk_mask pipeline failed: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3768,14 +3768,14 @@ int ds4_gpu_init(void) {
 
         fn = [library newFunctionWithName:@"kernel_dsv4_topk_mask_scatter"];
         if (!fn) {
-            fprintf(stderr, "ds4: Metal kernel_dsv4_topk_mask_scatter function not found\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal kernel_dsv4_topk_mask_scatter function not found\n");
             g_queue = nil;
             g_device = nil;
             return 0;
         }
         g_dsv4_topk_mask_scatter_pipeline = [g_device newComputePipelineStateWithFunction:fn error:&error];
         if (!g_dsv4_topk_mask_scatter_pipeline) {
-            fprintf(stderr, "ds4: Metal kernel_dsv4_topk_mask_scatter pipeline failed: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal kernel_dsv4_topk_mask_scatter pipeline failed: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3784,14 +3784,14 @@ int ds4_gpu_init(void) {
 
         fn = [library newFunctionWithName:@"kernel_dsv4_indexer_weighted_sum"];
         if (!fn) {
-            fprintf(stderr, "ds4: Metal kernel_dsv4_indexer_weighted_sum function not found\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal kernel_dsv4_indexer_weighted_sum function not found\n");
             g_queue = nil;
             g_device = nil;
             return 0;
         }
         g_dsv4_indexer_weighted_sum_pipeline = [g_device newComputePipelineStateWithFunction:fn error:&error];
         if (!g_dsv4_indexer_weighted_sum_pipeline) {
-            fprintf(stderr, "ds4: Metal kernel_dsv4_indexer_weighted_sum pipeline failed: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal kernel_dsv4_indexer_weighted_sum pipeline failed: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3800,14 +3800,14 @@ int ds4_gpu_init(void) {
 
         fn = [library newFunctionWithName:@"kernel_dsv4_hc_split_sinkhorn"];
         if (!fn) {
-            fprintf(stderr, "ds4: Metal kernel_dsv4_hc_split_sinkhorn function not found\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal kernel_dsv4_hc_split_sinkhorn function not found\n");
             g_queue = nil;
             g_device = nil;
             return 0;
         }
         g_hc_split_sinkhorn_pipeline = [g_device newComputePipelineStateWithFunction:fn error:&error];
         if (!g_hc_split_sinkhorn_pipeline) {
-            fprintf(stderr, "ds4: Metal kernel_dsv4_hc_split_sinkhorn pipeline failed: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal kernel_dsv4_hc_split_sinkhorn pipeline failed: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3816,14 +3816,14 @@ int ds4_gpu_init(void) {
 
         fn = [library newFunctionWithName:@"kernel_dsv4_hc_split_weighted_sum"];
         if (!fn) {
-            fprintf(stderr, "ds4: Metal kernel_dsv4_hc_split_weighted_sum function not found\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal kernel_dsv4_hc_split_weighted_sum function not found\n");
             g_queue = nil;
             g_device = nil;
             return 0;
         }
         g_hc_split_weighted_sum_pipeline = [g_device newComputePipelineStateWithFunction:fn error:&error];
         if (!g_hc_split_weighted_sum_pipeline) {
-            fprintf(stderr, "ds4: Metal kernel_dsv4_hc_split_weighted_sum pipeline failed: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal kernel_dsv4_hc_split_weighted_sum pipeline failed: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3832,14 +3832,14 @@ int ds4_gpu_init(void) {
 
         fn = [library newFunctionWithName:@"kernel_dsv4_hc_split_weighted_sum_norm4"];
         if (!fn) {
-            fprintf(stderr, "ds4: Metal kernel_dsv4_hc_split_weighted_sum_norm4 function not found\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal kernel_dsv4_hc_split_weighted_sum_norm4 function not found\n");
             g_queue = nil;
             g_device = nil;
             return 0;
         }
         g_hc_split_weighted_sum_norm_pipeline = [g_device newComputePipelineStateWithFunction:fn error:&error];
         if (!g_hc_split_weighted_sum_norm_pipeline) {
-            fprintf(stderr, "ds4: Metal kernel_dsv4_hc_split_weighted_sum_norm4 pipeline failed: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal kernel_dsv4_hc_split_weighted_sum_norm4 pipeline failed: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3848,14 +3848,14 @@ int ds4_gpu_init(void) {
 
         fn = [library newFunctionWithName:@"kernel_dsv4_hc_weighted_sum"];
         if (!fn) {
-            fprintf(stderr, "ds4: Metal kernel_dsv4_hc_weighted_sum function not found\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal kernel_dsv4_hc_weighted_sum function not found\n");
             g_queue = nil;
             g_device = nil;
             return 0;
         }
         g_hc_weighted_sum_pipeline = [g_device newComputePipelineStateWithFunction:fn error:&error];
         if (!g_hc_weighted_sum_pipeline) {
-            fprintf(stderr, "ds4: Metal kernel_dsv4_hc_weighted_sum pipeline failed: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal kernel_dsv4_hc_weighted_sum pipeline failed: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3873,7 +3873,7 @@ int ds4_gpu_init(void) {
                            constantValues:unary_sigmoid_constants
                                     error:&error];
         if (!fn) {
-            fprintf(stderr, "ds4: Metal kernel_unary_f32_f32_4 sigmoid function not found: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal kernel_unary_f32_f32_4 sigmoid function not found: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3881,7 +3881,7 @@ int ds4_gpu_init(void) {
         }
         g_unary_sigmoid_pipeline = [g_device newComputePipelineStateWithFunction:fn error:&error];
         if (!g_unary_sigmoid_pipeline) {
-            fprintf(stderr, "ds4: Metal kernel_unary_f32_f32_4 sigmoid pipeline failed: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal kernel_unary_f32_f32_4 sigmoid pipeline failed: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3898,7 +3898,7 @@ int ds4_gpu_init(void) {
                            constantValues:unary_silu_constants
                                     error:&error];
         if (!fn) {
-            fprintf(stderr, "ds4: Metal kernel_unary_f32_f32_4 silu function not found: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal kernel_unary_f32_f32_4 silu function not found: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3906,7 +3906,7 @@ int ds4_gpu_init(void) {
         }
         g_unary_silu_pipeline = [g_device newComputePipelineStateWithFunction:fn error:&error];
         if (!g_unary_silu_pipeline) {
-            fprintf(stderr, "ds4: Metal kernel_unary_f32_f32_4 silu pipeline failed: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal kernel_unary_f32_f32_4 silu pipeline failed: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3923,7 +3923,7 @@ int ds4_gpu_init(void) {
                            constantValues:unary_softplus_constants
                                     error:&error];
         if (!fn) {
-            fprintf(stderr, "ds4: Metal kernel_unary_f32_f32_4 softplus function not found: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal kernel_unary_f32_f32_4 softplus function not found: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3931,7 +3931,7 @@ int ds4_gpu_init(void) {
         }
         g_unary_softplus_pipeline = [g_device newComputePipelineStateWithFunction:fn error:&error];
         if (!g_unary_softplus_pipeline) {
-            fprintf(stderr, "ds4: Metal kernel_unary_f32_f32_4 softplus pipeline failed: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal kernel_unary_f32_f32_4 softplus pipeline failed: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3948,7 +3948,7 @@ int ds4_gpu_init(void) {
                            constantValues:unary_sqrt_constants
                                     error:&error];
         if (!fn) {
-            fprintf(stderr, "ds4: Metal kernel_unary_f32_f32_4 sqrt function not found: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal kernel_unary_f32_f32_4 sqrt function not found: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3956,7 +3956,7 @@ int ds4_gpu_init(void) {
         }
         g_unary_sqrt_pipeline = [g_device newComputePipelineStateWithFunction:fn error:&error];
         if (!g_unary_sqrt_pipeline) {
-            fprintf(stderr, "ds4: Metal kernel_unary_f32_f32_4 sqrt pipeline failed: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal kernel_unary_f32_f32_4 sqrt pipeline failed: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3973,7 +3973,7 @@ int ds4_gpu_init(void) {
                            constantValues:unary_clamp_constants
                                     error:&error];
         if (!fn) {
-            fprintf(stderr, "ds4: Metal kernel_unary_f32_f32 clamp function not found: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal kernel_unary_f32_f32 clamp function not found: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3981,7 +3981,7 @@ int ds4_gpu_init(void) {
         }
         g_unary_clamp_pipeline = [g_device newComputePipelineStateWithFunction:fn error:&error];
         if (!g_unary_clamp_pipeline) {
-            fprintf(stderr, "ds4: Metal kernel_unary_f32_f32 clamp pipeline failed: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal kernel_unary_f32_f32 clamp pipeline failed: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -3998,7 +3998,7 @@ int ds4_gpu_init(void) {
                            constantValues:unary_scale_constants
                                     error:&error];
         if (!fn) {
-            fprintf(stderr, "ds4: Metal kernel_unary_f32_f32_4 scale function not found: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal kernel_unary_f32_f32_4 scale function not found: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -4006,7 +4006,7 @@ int ds4_gpu_init(void) {
         }
         g_unary_scale_pipeline = [g_device newComputePipelineStateWithFunction:fn error:&error];
         if (!g_unary_scale_pipeline) {
-            fprintf(stderr, "ds4: Metal kernel_unary_f32_f32_4 scale pipeline failed: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal kernel_unary_f32_f32_4 scale pipeline failed: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -4023,7 +4023,7 @@ int ds4_gpu_init(void) {
                            constantValues:unary_fill_constants
                                     error:&error];
         if (!fn) {
-            fprintf(stderr, "ds4: Metal kernel_unary_f32_f32_4 fill function not found: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal kernel_unary_f32_f32_4 fill function not found: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -4031,7 +4031,7 @@ int ds4_gpu_init(void) {
         }
         g_unary_fill_pipeline = [g_device newComputePipelineStateWithFunction:fn error:&error];
         if (!g_unary_fill_pipeline) {
-            fprintf(stderr, "ds4: Metal kernel_unary_f32_f32_4 fill pipeline failed: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal kernel_unary_f32_f32_4 fill pipeline failed: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -4043,7 +4043,7 @@ int ds4_gpu_init(void) {
                            constantValues:unary_fill_constants
                                     error:&error];
         if (!fn) {
-            fprintf(stderr, "ds4: Metal kernel_unary_f16_f16 fill function not found: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal kernel_unary_f16_f16 fill function not found: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -4051,7 +4051,7 @@ int ds4_gpu_init(void) {
         }
         g_unary_fill_f16_pipeline = [g_device newComputePipelineStateWithFunction:fn error:&error];
         if (!g_unary_fill_f16_pipeline) {
-            fprintf(stderr, "ds4: Metal kernel_unary_f16_f16 fill pipeline failed: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal kernel_unary_f16_f16 fill pipeline failed: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -4060,14 +4060,14 @@ int ds4_gpu_init(void) {
 
         fn = [library newFunctionWithName:@"kernel_dsv4_hc_expand"];
         if (!fn) {
-            fprintf(stderr, "ds4: Metal kernel_dsv4_hc_expand function not found\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal kernel_dsv4_hc_expand function not found\n");
             g_queue = nil;
             g_device = nil;
             return 0;
         }
         g_hc_expand_pipeline = [g_device newComputePipelineStateWithFunction:fn error:&error];
         if (!g_hc_expand_pipeline) {
-            fprintf(stderr, "ds4: Metal kernel_dsv4_hc_expand pipeline failed: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal kernel_dsv4_hc_expand pipeline failed: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -4131,7 +4131,7 @@ ds4_gpu_tensor *ds4_gpu_tensor_alloc(uint64_t bytes) {
             g_tensor_alloc_peak_bytes = g_tensor_alloc_live_bytes;
         }
         if (ds4_gpu_trace_allocs()) {
-            fprintf(stderr,
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT,
                     "ds4: Metal tensor alloc %.3f MiB live %.3f MiB peak %.3f MiB\n",
                     (double)bytes / (1024.0 * 1024.0),
                     (double)g_tensor_alloc_live_bytes / (1024.0 * 1024.0),
@@ -4180,7 +4180,7 @@ void ds4_gpu_tensor_free(ds4_gpu_tensor *tensor) {
                 g_tensor_alloc_live_bytes = 0;
             }
             if (ds4_gpu_trace_allocs()) {
-                fprintf(stderr,
+                ds4_gpu_log(DS4_GPU_LOG_DEFAULT,
                         "ds4: Metal tensor free %.3f MiB live %.3f MiB peak %.3f MiB\n",
                         (double)obj.bytes / (1024.0 * 1024.0),
                         (double)g_tensor_alloc_live_bytes / (1024.0 * 1024.0),
@@ -4660,13 +4660,13 @@ int ds4_gpu_embed_token_hc_tensor(
         id<MTLBuffer> outbuf = ds4_gpu_tensor_buffer(out_hc);
         const uint64_t out_bytes = (uint64_t)n_embd * n_hc * sizeof(float);
         if (!outbuf || ds4_gpu_tensor_bytes(out_hc) < out_bytes) {
-            fprintf(stderr, "ds4: Metal graph embedding received undersized HC output buffer\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal graph embedding received undersized HC output buffer\n");
             return 0;
         }
 
         const uint64_t weight_bytes = (uint64_t)n_vocab * n_embd * sizeof(uint16_t);
         if (weight_offset > model_size || weight_bytes > model_size - weight_offset) {
-            fprintf(stderr, "ds4: Metal graph embedding range is outside the mapped model\n");
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal graph embedding range is outside the mapped model\n");
             return 0;
         }
 
@@ -4758,13 +4758,13 @@ int ds4_gpu_embed_tokens_hc_tensor(
         if (!outbuf || !tokbuf ||
             ds4_gpu_tensor_bytes(out_hc) < out_bytes ||
             ds4_gpu_tensor_bytes(tokens) < token_bytes) {
-            fprintf(stderr, "ds4: Metal graph batched embedding received undersized buffers\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal graph batched embedding received undersized buffers\n");
             return 0;
         }
 
         const uint64_t weight_bytes = (uint64_t)n_vocab * n_embd * sizeof(uint16_t);
         if (weight_offset > model_size || weight_bytes > model_size - weight_offset) {
-            fprintf(stderr, "ds4: Metal graph batched embedding range is outside the mapped model\n");
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal graph batched embedding range is outside the mapped model\n");
             return 0;
         }
 
@@ -4845,7 +4845,7 @@ int ds4_gpu_set_model_map_range(const void *model_map, uint64_t model_size, uint
         g_model_mapped_offset = map_offset;
         g_model_mapped_size = map_size;
         g_model_mapped_max_tensor_bytes = max_tensor_bytes;
-        fprintf(stderr,
+        ds4_gpu_log(DS4_GPU_LOG_DEFAULT,
                 "ds4: Metal mapped mmaped model as %u overlapping shared buffers\n",
                 g_model_view_count);
         return 1;
@@ -4869,7 +4869,7 @@ static id<MTLBuffer> ds4_gpu_wrap_model_range(
         uint64_t   *inner_offset) {
     (void)model_map;
     if (model_size == 0 || offset > model_size || len > model_size - offset) {
-        fprintf(stderr, "ds4: Metal model range is outside the mapped model\n");
+        ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal model range is outside the mapped model\n");
         return nil;
     }
 
@@ -4887,7 +4887,7 @@ static id<MTLBuffer> ds4_gpu_wrap_model_range(
         }
     }
 
-    fprintf(stderr,
+    ds4_gpu_log(DS4_GPU_LOG_DEFAULT,
             "ds4: Metal model range %.2f..%.2f GiB is not covered by mapped model views\n",
             ds4_gpu_gib(offset),
             ds4_gpu_gib(end));
@@ -4923,7 +4923,7 @@ int ds4_gpu_indexer_score_one_tensor(
             ds4_gpu_tensor_bytes(weights) < weight_bytes ||
             ds4_gpu_tensor_bytes(index_comp) < comp_bytes ||
             ds4_gpu_tensor_bytes(scores) < score_bytes) {
-            fprintf(stderr, "ds4: Metal graph indexer score received undersized buffers\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal graph indexer score received undersized buffers\n");
             return 0;
         }
 
@@ -5068,11 +5068,11 @@ static int ds4_gpu_indexer_scores_batch_tensor(
             ds4_gpu_tensor_bytes(weights) < weight_bytes ||
             ds4_gpu_tensor_bytes(index_comp) < comp_bytes ||
             ds4_gpu_tensor_bytes(scores) < score_bytes) {
-            fprintf(stderr, "ds4: Metal graph indexer prefill scores received undersized buffers\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal graph indexer prefill scores received undersized buffers\n");
             return 0;
         }
         if (head_dim != 128) {
-            fprintf(stderr, "ds4: Metal fused DS4 indexer scores expect 128-wide rows\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal fused DS4 indexer scores expect 128-wide rows\n");
             return 0;
         }
         /*
@@ -5217,7 +5217,7 @@ int ds4_gpu_indexer_topk_tensor(
         if (!scorebuf || !selbuf ||
             ds4_gpu_tensor_bytes(scores) < score_bytes ||
             ds4_gpu_tensor_bytes(selected) < selected_bytes) {
-            fprintf(stderr, "ds4: Metal graph indexer top-k received undersized buffers\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal graph indexer top-k received undersized buffers\n");
             return 0;
         }
         NSUInteger max_threads = g_argsort_f32_i32_desc_pipeline.maxTotalThreadsPerThreadgroup;
@@ -5346,7 +5346,7 @@ int ds4_gpu_dsv4_topk_mask_tensor(
         if (!topkbuf || !maskbuf ||
             ds4_gpu_tensor_bytes(topk) < topk_bytes ||
             ds4_gpu_tensor_bytes(mask) < mask_bytes) {
-            fprintf(stderr, "ds4: Metal dsv4 top-k mask received undersized buffers\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal dsv4 top-k mask received undersized buffers\n");
             return 0;
         }
 
@@ -5412,7 +5412,7 @@ static int ds4_gpu_matmul_q8_0_legacy_tensor(
         if (!xbuf || !outbuf ||
             ds4_gpu_tensor_bytes(x) < x_bytes ||
             ds4_gpu_tensor_bytes(out) < out_bytes) {
-            fprintf(stderr, "ds4: Metal Q8_0 tensor matmul received undersized activation buffers\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal Q8_0 tensor matmul received undersized activation buffers\n");
             return 0;
         }
 
@@ -5420,7 +5420,7 @@ static int ds4_gpu_matmul_q8_0_legacy_tensor(
         const uint64_t row_bytes = blocks * 34;
         const uint64_t weight_bytes = out_dim * row_bytes;
         if (weight_offset > model_size || weight_bytes > model_size - weight_offset) {
-            fprintf(stderr, "ds4: Metal Q8_0 tensor matmul range is outside the mapped model\n");
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal Q8_0 tensor matmul range is outside the mapped model\n");
             return 0;
         }
 
@@ -5674,7 +5674,7 @@ int ds4_gpu_shared_gate_up_swiglu_q8_0_tensor(
             ds4_gpu_tensor_bytes(gate) < out_bytes ||
             ds4_gpu_tensor_bytes(up) < out_bytes ||
             ds4_gpu_tensor_bytes(mid) < out_bytes) {
-            fprintf(stderr, "ds4: Metal shared expert fused gate/up received undersized activation buffers\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal shared expert fused gate/up received undersized activation buffers\n");
             return 0;
         }
 
@@ -5683,7 +5683,7 @@ int ds4_gpu_shared_gate_up_swiglu_q8_0_tensor(
         const uint64_t weight_bytes = out_dim * row_bytes;
         if (gate_offset > model_size || weight_bytes > model_size - gate_offset ||
             up_offset > model_size || weight_bytes > model_size - up_offset) {
-            fprintf(stderr, "ds4: Metal shared expert fused gate/up range is outside the mapped model\n");
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal shared expert fused gate/up range is outside the mapped model\n");
             return 0;
         }
 
@@ -5753,14 +5753,14 @@ int ds4_gpu_matmul_f16_tensor(
         if (!xbuf || !outbuf ||
             ds4_gpu_tensor_bytes(x) < x_bytes ||
             ds4_gpu_tensor_bytes(out) < out_bytes) {
-            fprintf(stderr, "ds4: Metal F16 tensor matmul received undersized activation buffers\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal F16 tensor matmul received undersized activation buffers\n");
             return 0;
         }
 
         const uint64_t row_bytes = in_dim * sizeof(uint16_t);
         const uint64_t weight_bytes = row_bytes * out_dim;
         if (weight_offset > model_size || weight_bytes > model_size - weight_offset) {
-            fprintf(stderr, "ds4: Metal F16 tensor matmul range is outside the mapped model\n");
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal F16 tensor matmul range is outside the mapped model\n");
             return 0;
         }
 
@@ -5932,7 +5932,7 @@ int ds4_gpu_matmul_f16_pair_tensor(
             ds4_gpu_tensor_bytes(x) < x_bytes ||
             ds4_gpu_tensor_bytes(out_a) < out_bytes ||
             ds4_gpu_tensor_bytes(out_b) < out_bytes) {
-            fprintf(stderr, "ds4: Metal F16 paired matvec received undersized activation buffers\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal F16 paired matvec received undersized activation buffers\n");
             return 0;
         }
 
@@ -5940,7 +5940,7 @@ int ds4_gpu_matmul_f16_pair_tensor(
         const uint64_t weight_bytes = row_bytes * out_dim;
         if (weight_a_offset > model_size || weight_bytes > model_size - weight_a_offset ||
             weight_b_offset > model_size || weight_bytes > model_size - weight_b_offset) {
-            fprintf(stderr, "ds4: Metal F16 paired matvec range is outside the mapped model\n");
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal F16 paired matvec range is outside the mapped model\n");
             return 0;
         }
 
@@ -6013,14 +6013,14 @@ int ds4_gpu_matmul_f32_tensor(
         if (!xbuf || !outbuf ||
             ds4_gpu_tensor_bytes(x) < x_bytes ||
             ds4_gpu_tensor_bytes(out) < out_bytes) {
-            fprintf(stderr, "ds4: Metal F32 tensor matmul received undersized activation buffers\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal F32 tensor matmul received undersized activation buffers\n");
             return 0;
         }
 
         const uint64_t row_bytes = in_dim * sizeof(float);
         const uint64_t weight_bytes = row_bytes * out_dim;
         if (weight_offset > model_size || weight_bytes > model_size - weight_offset) {
-            fprintf(stderr, "ds4: Metal F32 tensor matmul range is outside the mapped model\n");
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal F32 tensor matmul range is outside the mapped model\n");
             return 0;
         }
 
@@ -6076,7 +6076,7 @@ int ds4_gpu_repeat_hc_tensor(
         if (!rowbuf || !outbuf ||
             ds4_gpu_tensor_bytes(row) < row_bytes ||
             ds4_gpu_tensor_bytes(out) < out_bytes) {
-            fprintf(stderr, "ds4: Metal HC repeat received undersized buffers\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal HC repeat received undersized buffers\n");
             return 0;
         }
 
@@ -6123,7 +6123,7 @@ int ds4_gpu_rms_norm_plain_rows_tensor(
         if (!xbuf || !outbuf ||
             ds4_gpu_tensor_bytes(x) < bytes ||
             ds4_gpu_tensor_bytes(out) < bytes) {
-            fprintf(stderr, "ds4: Metal plain RMS norm received undersized activation buffers\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal plain RMS norm received undersized activation buffers\n");
             return 0;
         }
 
@@ -6181,11 +6181,11 @@ int ds4_gpu_rms_norm_weight_rows_tensor(
         if (!xbuf || !outbuf ||
             ds4_gpu_tensor_bytes(x) < bytes ||
             ds4_gpu_tensor_bytes(out) < bytes) {
-            fprintf(stderr, "ds4: Metal weighted RMS norm received undersized activation buffers\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal weighted RMS norm received undersized activation buffers\n");
             return 0;
         }
         if (weight_offset > model_size || row_bytes > model_size - weight_offset) {
-            fprintf(stderr, "ds4: Metal weighted RMS norm range is outside the mapped model\n");
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal weighted RMS norm range is outside the mapped model\n");
             return 0;
         }
 
@@ -6248,12 +6248,12 @@ int ds4_gpu_dsv4_qkv_rms_norm_rows_tensor(
             ds4_gpu_tensor_bytes(q_out) < q_row_bytes * rows ||
             ds4_gpu_tensor_bytes(kv) < kv_row_bytes * rows ||
             ds4_gpu_tensor_bytes(kv_out) < kv_row_bytes * rows) {
-            fprintf(stderr, "ds4: Metal fused q/kv RMS norm received undersized activation buffers\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal fused q/kv RMS norm received undersized activation buffers\n");
             return 0;
         }
         if (q_weight_offset > model_size || q_row_bytes > model_size - q_weight_offset ||
             kv_weight_offset > model_size || kv_row_bytes > model_size - kv_weight_offset) {
-            fprintf(stderr, "ds4: Metal fused q/kv RMS norm weight range is outside the mapped model\n");
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal fused q/kv RMS norm weight range is outside the mapped model\n");
             return 0;
         }
 
@@ -6315,7 +6315,7 @@ int ds4_gpu_head_rms_norm_tensor(
         id<MTLBuffer> xbuf = ds4_gpu_tensor_buffer(x);
         const uint64_t bytes = (uint64_t)n_tok * n_head * head_dim * sizeof(float);
         if (!xbuf || ds4_gpu_tensor_bytes(x) < bytes) {
-            fprintf(stderr, "ds4: Metal head RMS norm received undersized activation buffer\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal head RMS norm received undersized activation buffer\n");
             return 0;
         }
 
@@ -6368,7 +6368,7 @@ int ds4_gpu_rope_tail_tensor(
         id<MTLBuffer> xbuf = ds4_gpu_tensor_buffer(x);
         const uint64_t bytes = (uint64_t)n_tok * n_head * head_dim * sizeof(float);
         if (!xbuf || ds4_gpu_tensor_bytes(x) < bytes) {
-            fprintf(stderr, "ds4: Metal RoPE received undersized activation buffer\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal RoPE received undersized activation buffer\n");
             return 0;
         }
 
@@ -6411,7 +6411,7 @@ int ds4_gpu_dsv4_fp8_kv_quantize_tensor(
         id<MTLBuffer> xbuf = ds4_gpu_tensor_buffer(x);
         const uint64_t bytes = (uint64_t)n_tok * head_dim * sizeof(float);
         if (!xbuf || ds4_gpu_tensor_bytes(x) < bytes) {
-            fprintf(stderr, "ds4: Metal DSV4 FP8 KV quantize received undersized activation buffer\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal DSV4 FP8 KV quantize received undersized activation buffer\n");
             return 0;
         }
 
@@ -6462,7 +6462,7 @@ int ds4_gpu_dsv4_indexer_qat_tensor(
         id<MTLBuffer> xbuf = ds4_gpu_tensor_buffer(x);
         const uint64_t bytes = (uint64_t)n_rows * head_dim * sizeof(float);
         if (!xbuf || ds4_gpu_tensor_bytes(x) < bytes) {
-            fprintf(stderr, "ds4: Metal DSV4 indexer QAT received undersized activation buffer\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal DSV4 indexer QAT received undersized activation buffer\n");
             return 0;
         }
 
@@ -6529,7 +6529,7 @@ static int ds4_gpu_encode_f16_round_copy_for_raw_store(
     id<MTLBuffer> srcbuf = ds4_gpu_tensor_buffer(src);
     const uint64_t src_bytes = (uint64_t)n * sizeof(float);
     if (!srcbuf || ds4_gpu_tensor_bytes(src) < src_bytes) {
-        fprintf(stderr, "ds4: Metal raw KV store received undersized source buffer\n");
+        ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal raw KV store received undersized source buffer\n");
         return 0;
     }
     if (!ds4_gpu_ensure_scratch_buffer(&g_f16_round_scratch_buffer,
@@ -6588,7 +6588,7 @@ static int ds4_gpu_encode_set_rows_f32_i32(
     if (!dstbuf || !srcbuf || !rows || n_rows == 0 || width == 0 ||
         ds4_gpu_tensor_bytes(dst) < dst_bytes ||
         src_bytes > NSUIntegerMax - src_off) {
-        fprintf(stderr, "ds4: Metal DS4 set_rows received invalid buffers\n");
+        ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal DS4 set_rows received invalid buffers\n");
         return 0;
     }
 
@@ -6710,7 +6710,7 @@ int ds4_gpu_store_raw_kv_tensor(
     @autoreleasepool {
         const uint64_t raw_bytes = (uint64_t)raw_cap * head_dim * sizeof(float);
         if (ds4_gpu_tensor_bytes(raw_cache) < raw_bytes) {
-            fprintf(stderr, "ds4: Metal raw KV store received undersized destination buffer\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal raw KV store received undersized destination buffer\n");
             return 0;
         }
 
@@ -6760,7 +6760,7 @@ int ds4_gpu_kv_fp8_store_raw_tensor(
         if (!kvbuf || !rawbuf ||
             ds4_gpu_tensor_bytes(kv) < kv_bytes ||
             ds4_gpu_tensor_bytes(raw_cache) < raw_bytes) {
-            fprintf(stderr, "ds4: Metal fused KV FP8/raw-store received undersized buffers\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal fused KV FP8/raw-store received undersized buffers\n");
             return 0;
         }
 
@@ -6803,7 +6803,7 @@ int ds4_gpu_store_raw_kv_batch_tensor(
     @autoreleasepool {
         const uint64_t raw_bytes = (uint64_t)raw_cap * head_dim * sizeof(float);
         if (ds4_gpu_tensor_bytes(raw_cache) < raw_bytes) {
-            fprintf(stderr, "ds4: Metal raw KV batch store received undersized destination buffer\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal raw KV batch store received undersized destination buffer\n");
             return 0;
         }
 
@@ -6812,7 +6812,7 @@ int ds4_gpu_store_raw_kv_batch_tensor(
         if (n_tokens > (uint32_t)(sizeof(rows_stack) / sizeof(rows_stack[0]))) {
             rows = malloc((size_t)n_tokens * sizeof(*rows));
             if (!rows) {
-                fprintf(stderr, "ds4: failed to allocate raw KV set_rows index list\n");
+                ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: failed to allocate raw KV set_rows index list\n");
                 return 0;
             }
         }
@@ -6867,7 +6867,7 @@ static int ds4_gpu_encode_compressor_score_with_ape(
 
     const uint64_t total_elems64 = (uint64_t)n_tokens * width;
     if (total_elems64 > UINT32_MAX) {
-        fprintf(stderr, "ds4: Metal compressor APE add received too many elements\n");
+        ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal compressor APE add received too many elements\n");
         return 0;
     }
     const uint32_t total_elems = (uint32_t)total_elems64;
@@ -7081,7 +7081,7 @@ int ds4_gpu_compressor_store_batch_tensor(
         const uint64_t ape_bytes = (uint64_t)width * ratio * elem_ape;
 
         if (ape_offset > model_size || ape_bytes > model_size - ape_offset) {
-            fprintf(stderr, "ds4: Metal compressor batch APE range is outside the mapped model\n");
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal compressor batch APE range is outside the mapped model\n");
             return 0;
         }
 
@@ -7092,7 +7092,7 @@ int ds4_gpu_compressor_store_batch_tensor(
             ds4_gpu_tensor_bytes(sc) < kv_bytes ||
             ds4_gpu_tensor_bytes(state_kv) < state_bytes ||
             ds4_gpu_tensor_bytes(state_score) < state_bytes) {
-            fprintf(stderr, "ds4: Metal compressor batch store received undersized buffers\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal compressor batch store received undersized buffers\n");
             return 0;
         }
 
@@ -7102,7 +7102,7 @@ int ds4_gpu_compressor_store_batch_tensor(
 
         const uint64_t total_elems64 = (uint64_t)n_tokens * width;
         if (total_elems64 > UINT32_MAX || state_rows > INT32_MAX) {
-            fprintf(stderr, "ds4: Metal compressor batch store received too many elements\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal compressor batch store received too many elements\n");
             return 0;
         }
         const uint32_t total_elems = (uint32_t)total_elems64;
@@ -7123,7 +7123,7 @@ int ds4_gpu_compressor_store_batch_tensor(
         if (n_tokens > (uint32_t)(sizeof(rows_stack) / sizeof(rows_stack[0]))) {
             rows = malloc((size_t)n_tokens * sizeof(*rows));
             if (!rows) {
-                fprintf(stderr, "ds4: failed to allocate compressor set_rows index list\n");
+                ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: failed to allocate compressor set_rows index list\n");
                 return 0;
             }
         }
@@ -7731,7 +7731,7 @@ int ds4_gpu_compressor_prefill_tensor(
 
         if (ape_offset > model_size || ape_bytes > model_size - ape_offset ||
             norm_offset > model_size || norm_bytes > model_size - norm_offset) {
-            fprintf(stderr, "ds4: Metal compressor prefill tensor range is outside the mapped model\n");
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal compressor prefill tensor range is outside the mapped model\n");
             return 0;
         }
 
@@ -7746,7 +7746,7 @@ int ds4_gpu_compressor_prefill_tensor(
             ds4_gpu_tensor_bytes(state_kv) < state_bytes ||
             ds4_gpu_tensor_bytes(state_score) < state_bytes ||
             (n_comp && ds4_gpu_tensor_bytes(comp_cache) < comp_bytes)) {
-            fprintf(stderr, "ds4: Metal compressor prefill received undersized buffers\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal compressor prefill received undersized buffers\n");
             return 0;
         }
 
@@ -7826,7 +7826,7 @@ int ds4_gpu_compressor_prefill_tensor(
         } else if (ok && rem != 0) {
             int32_t rows[128];
             if (rem > (uint32_t)(sizeof(rows) / sizeof(rows[0]))) {
-                fprintf(stderr, "ds4: Metal compressor prefill remainder exceeds local row list\n");
+                ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal compressor prefill remainder exceeds local row list\n");
                 ok = 0;
             } else {
                 for (uint32_t i = 0; i < rem; i++) rows[i] = (int32_t)i;
@@ -8084,7 +8084,7 @@ int ds4_gpu_compressor_prefill_ratio4_replay_tensor(
 
         if (ape_offset > model_size || ape_bytes > model_size - ape_offset ||
             norm_offset > model_size || norm_bytes > model_size - norm_offset) {
-            fprintf(stderr, "ds4: Metal compressor replay tensor range is outside the mapped model\n");
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal compressor replay tensor range is outside the mapped model\n");
             return 0;
         }
 
@@ -8099,7 +8099,7 @@ int ds4_gpu_compressor_prefill_ratio4_replay_tensor(
             ds4_gpu_tensor_bytes(state_kv) < state_bytes ||
             ds4_gpu_tensor_bytes(state_score) < state_bytes ||
             ds4_gpu_tensor_bytes(comp_cache) < comp_bytes) {
-            fprintf(stderr, "ds4: Metal compressor replay received undersized buffers\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal compressor replay received undersized buffers\n");
             return 0;
         }
 
@@ -8373,7 +8373,7 @@ int ds4_gpu_compressor_prefill_state_ratio4_tensor(
         const uint64_t ape_bytes = (uint64_t)ratio * width * elem_ape;
 
         if (ape_offset > model_size || ape_bytes > model_size - ape_offset) {
-            fprintf(stderr, "ds4: Metal compressor prefill-state APE range is outside the mapped model\n");
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal compressor prefill-state APE range is outside the mapped model\n");
             return 0;
         }
 
@@ -8386,7 +8386,7 @@ int ds4_gpu_compressor_prefill_state_ratio4_tensor(
             ds4_gpu_tensor_bytes(sc_tail) < tail_bytes ||
             ds4_gpu_tensor_bytes(state_kv) < state_bytes ||
             ds4_gpu_tensor_bytes(state_score) < state_bytes) {
-            fprintf(stderr, "ds4: Metal compressor prefill-state received undersized buffers\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal compressor prefill-state received undersized buffers\n");
             return 0;
         }
 
@@ -8492,7 +8492,7 @@ int ds4_gpu_compressor_update_tensor(
 
         if (ape_offset > model_size || ape_bytes > model_size - ape_offset ||
             norm_offset > model_size || norm_bytes > model_size - norm_offset) {
-            fprintf(stderr, "ds4: Metal compressor tensor range is outside the mapped model\n");
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal compressor tensor range is outside the mapped model\n");
             return 0;
         }
 
@@ -8505,7 +8505,7 @@ int ds4_gpu_compressor_update_tensor(
             ds4_gpu_tensor_bytes(state_kv) < state_bytes ||
             ds4_gpu_tensor_bytes(state_score) < state_bytes ||
             (emit && ds4_gpu_tensor_bytes(comp_cache) < comp_bytes)) {
-            fprintf(stderr, "ds4: Metal compressor update received undersized buffers\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal compressor update received undersized buffers\n");
             return 0;
         }
 
@@ -8656,7 +8656,7 @@ int ds4_gpu_attention_output_q8_batch_tensor(
     @autoreleasepool {
         const uint64_t low_dim = (uint64_t)n_groups * rank;
         if ((group_dim % 32u) != 0 || (low_dim % 32u) != 0 || low_dim > UINT32_MAX) {
-            fprintf(stderr, "ds4: Metal attention output batch received invalid q8 dimensions\n");
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal attention output batch received invalid q8 dimensions\n");
             return 0;
         }
         const uint64_t row_a_bytes = (group_dim / 32u) * 34u;
@@ -8665,7 +8665,7 @@ int ds4_gpu_attention_output_q8_batch_tensor(
         const uint64_t out_b_bytes = out_dim * row_b_bytes;
         if (out_a_offset > model_size || out_a_bytes > model_size - out_a_offset ||
             out_b_offset > model_size || out_b_bytes > model_size - out_b_offset) {
-            fprintf(stderr, "ds4: Metal attention output batch weights are outside the mapped model\n");
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal attention output batch weights are outside the mapped model\n");
             return 0;
         }
 
@@ -8675,7 +8675,7 @@ int ds4_gpu_attention_output_q8_batch_tensor(
         if (ds4_gpu_tensor_bytes(heads) < heads_bytes ||
             ds4_gpu_tensor_bytes(low) < low_bytes ||
             ds4_gpu_tensor_bytes(out) < out_bytes) {
-            fprintf(stderr, "ds4: Metal attention output batch received undersized buffers\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal attention output batch received undersized buffers\n");
             return 0;
         }
         (void)group_tmp;
@@ -8749,7 +8749,7 @@ int ds4_gpu_attention_output_q8_batch_tensor(
                     ok = false; \
                 } else { \
                     const double now_ms = ds4_gpu_now_ms(); \
-                    fprintf(stderr, \
+                    ds4_gpu_log(DS4_GPU_LOG_DEFAULT, \
                             "ds4: Metal attention output stage tokens=%u %s=%.3f ms\n", \
                             n_tokens, (name), now_ms - attn_out_t0); \
                     attn_out_t0 = now_ms; \
@@ -8990,14 +8990,14 @@ int ds4_gpu_attention_output_low_q8_tensor(
     @autoreleasepool {
         const uint64_t low_dim = (uint64_t)n_groups * rank;
         if ((group_dim % 32u) != 0 || low_dim > UINT32_MAX) {
-            fprintf(stderr, "ds4: Metal attention output low received invalid q8 dimensions\n");
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal attention output low received invalid q8 dimensions\n");
             return 0;
         }
 
         const uint64_t row_a_bytes = (group_dim / 32u) * 34u;
         const uint64_t out_a_bytes = (uint64_t)n_groups * rank * row_a_bytes;
         if (out_a_offset > model_size || out_a_bytes > model_size - out_a_offset) {
-            fprintf(stderr, "ds4: Metal attention output low weights are outside the mapped model\n");
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal attention output low weights are outside the mapped model\n");
             return 0;
         }
 
@@ -9005,7 +9005,7 @@ int ds4_gpu_attention_output_low_q8_tensor(
         const uint64_t low_bytes = low_dim * sizeof(float);
         if (ds4_gpu_tensor_bytes(heads) < heads_bytes ||
             ds4_gpu_tensor_bytes(low) < low_bytes) {
-            fprintf(stderr, "ds4: Metal attention output low received undersized buffers\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal attention output low received undersized buffers\n");
             return 0;
         }
 
@@ -9380,7 +9380,7 @@ static int ds4_gpu_encode_flash_attention_raw_heads(
         ds4_gpu_tensor_bytes(q) < q_bytes ||
         ds4_gpu_tensor_bytes(raw_kv) < raw_bytes ||
         ds4_gpu_tensor_bytes(heads) < heads_bytes) {
-        fprintf(stderr, "ds4: Metal DS4 FlashAttention received undersized buffers\n");
+        ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal DS4 FlashAttention received undersized buffers\n");
         return 0;
     }
 
@@ -9706,7 +9706,7 @@ static int ds4_gpu_encode_flash_attention_prefill_static_mixed_heads_nonvec_long
         (n_comp && ds4_gpu_tensor_bytes(comp_kv) < comp_bytes) ||
         (use_comp_mask && ds4_gpu_tensor_bytes(comp_mask) < comp_mask_bytes) ||
         ds4_gpu_tensor_bytes(heads) < q_bytes) {
-        fprintf(stderr, "ds4: Metal prefill static mixed DS4 non-vector FlashAttention received undersized buffers\n");
+        ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal prefill static mixed DS4 non-vector FlashAttention received undersized buffers\n");
         return 0;
     }
 
@@ -9981,7 +9981,7 @@ static int ds4_gpu_encode_flash_attention_prefill_static_mixed_heads_vec(
         (n_comp && ds4_gpu_tensor_bytes(comp_kv) < comp_bytes) ||
         (use_comp_mask && ds4_gpu_tensor_bytes(comp_mask) < comp_mask_bytes) ||
         ds4_gpu_tensor_bytes(heads) < q_bytes) {
-        fprintf(stderr, "ds4: Metal prefill static mixed DS4 FlashAttention received undersized buffers\n");
+        ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal prefill static mixed DS4 FlashAttention received undersized buffers\n");
         return 0;
     }
 
@@ -10286,7 +10286,7 @@ static int ds4_gpu_encode_flash_attention_prefill_raw_heads_nonvec(
         ds4_gpu_tensor_bytes(q) < q_bytes ||
         ds4_gpu_tensor_bytes(raw_kv) < raw_bytes ||
         ds4_gpu_tensor_bytes(heads) < q_bytes) {
-        fprintf(stderr, "ds4: Metal prefill raw DS4 non-vector FlashAttention received undersized buffers\n");
+        ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal prefill raw DS4 non-vector FlashAttention received undersized buffers\n");
         return 0;
     }
 
@@ -10528,7 +10528,7 @@ static int ds4_gpu_encode_flash_attention_prefill_raw_heads(
         ds4_gpu_tensor_bytes(q) < q_bytes ||
         ds4_gpu_tensor_bytes(raw_kv) < raw_bytes ||
         ds4_gpu_tensor_bytes(heads) < q_bytes) {
-        fprintf(stderr, "ds4: Metal prefill raw DS4 FlashAttention received undersized buffers\n");
+        ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal prefill raw DS4 FlashAttention received undersized buffers\n");
         return 0;
     }
 
@@ -10763,7 +10763,7 @@ static int ds4_gpu_encode_flash_attention_gathered_heads(
         (n_comp && ds4_gpu_tensor_bytes(comp_kv) < comp_bytes) ||
         ds4_gpu_tensor_bytes(heads) < q_bytes ||
         (use_mask && ds4_gpu_tensor_bytes(comp_mask) < comp_mask_bytes)) {
-        fprintf(stderr, "ds4: Metal gathered DS4 FlashAttention received undersized buffers\n");
+        ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal gathered DS4 FlashAttention received undersized buffers\n");
         return 0;
     }
 
@@ -11012,7 +11012,7 @@ static int ds4_gpu_encode_flash_attention_decode_raw_batch_heads(
         ds4_gpu_tensor_bytes(q) < q_bytes ||
         ds4_gpu_tensor_bytes(raw_kv) < raw_bytes ||
         ds4_gpu_tensor_bytes(heads) < q_bytes) {
-        fprintf(stderr, "ds4: Metal decode raw batch FlashAttention received undersized buffers\n");
+        ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal decode raw batch FlashAttention received undersized buffers\n");
         return 0;
     }
 
@@ -11283,7 +11283,7 @@ static int ds4_gpu_encode_flash_attention_decode_mixed_batch_heads(
         ds4_gpu_tensor_bytes(comp_kv) < comp_bytes ||
         (use_comp_mask && ds4_gpu_tensor_bytes(comp_mask) < comp_mask_bytes) ||
         ds4_gpu_tensor_bytes(heads) < q_bytes) {
-        fprintf(stderr, "ds4: Metal decode mixed batch FlashAttention received undersized buffers\n");
+        ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal decode mixed batch FlashAttention received undersized buffers\n");
         return 0;
     }
 
@@ -11532,7 +11532,7 @@ int ds4_gpu_attention_prefill_raw_heads_tensor(
 
     @autoreleasepool {
         if (sinks_offset > model_size || (uint64_t)n_head * sizeof(float) > model_size - sinks_offset) {
-            fprintf(stderr, "ds4: Metal attention sinks range is outside the mapped model\n");
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal attention sinks range is outside the mapped model\n");
             return 0;
         }
 
@@ -11589,7 +11589,7 @@ int ds4_gpu_attention_decode_raw_batch_heads_tensor(
 
     @autoreleasepool {
         if (sinks_offset > model_size || (uint64_t)n_head * sizeof(float) > model_size - sinks_offset) {
-            fprintf(stderr, "ds4: Metal attention sinks range is outside the mapped model\n");
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal attention sinks range is outside the mapped model\n");
             return 0;
         }
 
@@ -11658,7 +11658,7 @@ int ds4_gpu_attention_decode_mixed_batch_heads_tensor(
 
     @autoreleasepool {
         if (sinks_offset > model_size || (uint64_t)n_head * sizeof(float) > model_size - sinks_offset) {
-            fprintf(stderr, "ds4: Metal attention sinks range is outside the mapped model\n");
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal attention sinks range is outside the mapped model\n");
             return 0;
         }
 
@@ -11733,7 +11733,7 @@ int ds4_gpu_attention_indexed_mixed_batch_heads_tensor(
 
     @autoreleasepool {
         if (sinks_offset > model_size || (uint64_t)n_head * sizeof(float) > model_size - sinks_offset) {
-            fprintf(stderr, "ds4: Metal indexed attention sinks range is outside the mapped model\n");
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal indexed attention sinks range is outside the mapped model\n");
             return 0;
         }
 
@@ -11754,7 +11754,7 @@ int ds4_gpu_attention_indexed_mixed_batch_heads_tensor(
             ds4_gpu_tensor_bytes(comp_kv) < comp_bytes ||
             ds4_gpu_tensor_bytes(topk) < topk_bytes ||
             ds4_gpu_tensor_bytes(heads) < q_bytes) {
-            fprintf(stderr, "ds4: Metal indexed mixed attention received undersized buffers\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal indexed mixed attention received undersized buffers\n");
             return 0;
         }
 
@@ -11777,7 +11777,7 @@ int ds4_gpu_attention_indexed_mixed_batch_heads_tensor(
                                    "kernel_dsv4_indexed_mixed_attention_heads8");
         if (!sort_pipeline || !attn_pipeline) return 0;
         if ((NSUInteger)top_k > sort_pipeline.maxTotalThreadsPerThreadgroup) {
-            fprintf(stderr, "ds4: Metal indexed attention top-k exceeds sort threadgroup limit\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal indexed attention top-k exceeds sort threadgroup limit\n");
             return 0;
         }
         /*
@@ -11891,7 +11891,7 @@ int ds4_gpu_attention_prefill_static_mixed_heads_tensor(
 
     @autoreleasepool {
         if (sinks_offset > model_size || (uint64_t)n_head * sizeof(float) > model_size - sinks_offset) {
-            fprintf(stderr, "ds4: Metal attention sinks range is outside the mapped model\n");
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal attention sinks range is outside the mapped model\n");
             return 0;
         }
 
@@ -11955,7 +11955,7 @@ int ds4_gpu_attention_prefill_masked_mixed_heads_tensor(
 
     @autoreleasepool {
         if (sinks_offset > model_size || (uint64_t)n_head * sizeof(float) > model_size - sinks_offset) {
-            fprintf(stderr, "ds4: Metal attention sinks range is outside the mapped model\n");
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal attention sinks range is outside the mapped model\n");
             return 0;
         }
 
@@ -12029,7 +12029,7 @@ int ds4_gpu_attention_decode_heads_tensor(
                                     (comp_kv_f16 ? sizeof(uint16_t) : sizeof(float));
         const uint64_t sink_bytes = (uint64_t)n_head * sizeof(float);
         if (sinks_offset > model_size || sink_bytes > model_size - sinks_offset) {
-            fprintf(stderr, "ds4: Metal graph attention heads sink range is outside the mapped model\n");
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal graph attention heads sink range is outside the mapped model\n");
             return 0;
         }
 
@@ -12045,7 +12045,7 @@ int ds4_gpu_attention_decode_heads_tensor(
             (n_comp && ds4_gpu_tensor_bytes(comp_kv) < comp_bytes) ||
             (use_mask && ds4_gpu_tensor_bytes(comp_mask) < comp_mask_bytes) ||
             ds4_gpu_tensor_bytes(heads) < q_bytes) {
-            fprintf(stderr, "ds4: Metal graph attention heads received undersized buffers\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal graph attention heads received undersized buffers\n");
             return 0;
         }
 
@@ -12125,7 +12125,7 @@ int ds4_gpu_swiglu_tensor(
             ds4_gpu_tensor_bytes(gate) < bytes ||
             ds4_gpu_tensor_bytes(up) < bytes ||
             ds4_gpu_tensor_bytes(out) < bytes) {
-            fprintf(stderr, "ds4: Metal SwiGLU received undersized buffers\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal SwiGLU received undersized buffers\n");
             return 0;
         }
 
@@ -12183,7 +12183,7 @@ int ds4_gpu_add_tensor(
             ds4_gpu_tensor_bytes(a) < bytes ||
             ds4_gpu_tensor_bytes(b) < bytes ||
             ds4_gpu_tensor_bytes(out) < bytes) {
-            fprintf(stderr, "ds4: Metal tensor add received undersized buffers\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal tensor add received undersized buffers\n");
             return 0;
         }
 
@@ -12273,7 +12273,7 @@ int ds4_gpu_directional_steering_project_tensor(
         if (!xbuf || !dbuf ||
             ds4_gpu_tensor_bytes(x) < x_bytes ||
             ds4_gpu_tensor_bytes(directions) < dir_bytes) {
-            fprintf(stderr, "ds4: Metal directional steering received undersized buffers\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal directional steering received undersized buffers\n");
             return 0;
         }
 
@@ -13659,7 +13659,7 @@ int ds4_gpu_router_select_tensor(
         n_expert == 0 || n_expert_used == 0) return 0;
     if (hash_mode && token >= hash_rows) return 0;
     if (n_expert_groups > 1u || n_group_used > 0u) {
-        fprintf(stderr, "ds4: Metal router group gating is not part of this DeepSeek V4 path\n");
+        ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal router group gating is not part of this DeepSeek V4 path\n");
         return 0;
     }
 
@@ -13673,7 +13673,7 @@ int ds4_gpu_router_select_tensor(
             ds4_gpu_tensor_bytes(selected) < (uint64_t)n_expert_used * sizeof(int) ||
             ds4_gpu_tensor_bytes(weights) < (uint64_t)n_expert_used * sizeof(float) ||
             ds4_gpu_tensor_bytes(probs) < (uint64_t)n_expert * sizeof(float)) {
-            fprintf(stderr, "ds4: Metal router select received undersized buffers\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal router select received undersized buffers\n");
             return 0;
         }
 
@@ -13754,7 +13754,7 @@ int ds4_gpu_router_select_batch_tensor(
     if (!selected || !weights || !probs || !logits || !tokens || !model_map ||
         n_expert == 0 || n_expert_used == 0 || n_tokens == 0) return 0;
     if (n_expert_groups > 1u || n_group_used > 0u) {
-        fprintf(stderr, "ds4: Metal router group gating is not part of this DeepSeek V4 path\n");
+        ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal router group gating is not part of this DeepSeek V4 path\n");
         return 0;
     }
 
@@ -13770,7 +13770,7 @@ int ds4_gpu_router_select_batch_tensor(
             ds4_gpu_tensor_bytes(weights) < (uint64_t)n_tokens * n_expert_used * sizeof(float) ||
             ds4_gpu_tensor_bytes(probs) < (uint64_t)n_tokens * n_expert * sizeof(float) ||
             ds4_gpu_tensor_bytes(tokens) < (uint64_t)n_tokens * sizeof(int32_t)) {
-            fprintf(stderr, "ds4: Metal router batch select received undersized buffers\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal router batch select received undersized buffers\n");
             return 0;
         }
 
@@ -13880,13 +13880,13 @@ int ds4_gpu_routed_moe_one_tensor(
             ds4_gpu_tensor_bytes(out) < out_bytes ||
             ds4_gpu_tensor_bytes(selected) < (uint64_t)n_expert * sizeof(int) ||
             ds4_gpu_tensor_bytes(weights) < (uint64_t)n_expert * sizeof(float)) {
-            fprintf(stderr, "ds4: Metal routed tensor MoE received undersized activation buffers\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal routed tensor MoE received undersized activation buffers\n");
             return 0;
         }
         if (n_expert > 1 &&
             (!expertsbuf ||
              ds4_gpu_tensor_bytes(experts) < (uint64_t)n_expert * out_dim * sizeof(float))) {
-            fprintf(stderr, "ds4: Metal routed tensor MoE received undersized expert output buffer\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal routed tensor MoE received undersized expert output buffer\n");
             return 0;
         }
 
@@ -13916,7 +13916,7 @@ int ds4_gpu_routed_moe_one_tensor(
         id<MTLComputePipelineState> gate_mv_pipeline = ds4_gpu_routed_mv_pipeline(gate_type);
         id<MTLComputePipelineState> down_mv_pipeline = ds4_gpu_routed_mv_pipeline(down_type);
         if (gate_nr0 == 0 || down_nr0 == 0 || !gate_mv_pipeline || !down_mv_pipeline) {
-            fprintf(stderr, "ds4: unsupported Metal routed MoE quant types gate=%u down=%u\n",
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: unsupported Metal routed MoE quant types gate=%u down=%u\n",
                     gate_type, down_type);
             return 0;
         }
@@ -14192,13 +14192,13 @@ int ds4_gpu_routed_moe_batch_tensor(
             ds4_gpu_tensor_bytes(out) < out_bytes ||
             ds4_gpu_tensor_bytes(selected) < selected_bytes ||
             ds4_gpu_tensor_bytes(weights) < weights_bytes) {
-            fprintf(stderr, "ds4: Metal routed batch MoE received undersized activation buffers\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal routed batch MoE received undersized activation buffers\n");
             return 0;
         }
         if (n_expert > 1 &&
             (!expertsbuf ||
              ds4_gpu_tensor_bytes(experts) < (uint64_t)n_tokens * n_expert * out_dim * sizeof(float))) {
-            fprintf(stderr, "ds4: Metal routed batch MoE received undersized expert output buffer\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal routed batch MoE received undersized expert output buffer\n");
             return 0;
         }
 
@@ -14230,7 +14230,7 @@ int ds4_gpu_routed_moe_batch_tensor(
         id<MTLComputePipelineState> up_mm_pipeline = nil;
         id<MTLComputePipelineState> down_mm_pipeline = nil;
         if (gate_nr0 == 0 || down_nr0 == 0 || !gate_mv_pipeline || !down_mv_pipeline) {
-            fprintf(stderr, "ds4: unsupported Metal routed batch MoE quant types gate=%u down=%u\n",
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: unsupported Metal routed batch MoE quant types gate=%u down=%u\n",
                     gate_type, down_type);
             return 0;
         }
@@ -14324,7 +14324,7 @@ int ds4_gpu_routed_moe_batch_tensor(
                         !moe_stage_filter || !moe_stage_filter[0] || \
                         strstr(stage_name, moe_stage_filter) != NULL; \
                     if (print_stage) { \
-                        fprintf(stderr, \
+                        ds4_gpu_log(DS4_GPU_LOG_DEFAULT, \
                                 "ds4: Metal routed MoE stage layer=%u tokens=%u pairs=%u experts=%u " \
                                 "gate=%s down=%s path=%s mid=%s %s=%.3f ms\n", \
                                 layer_index, n_tokens, pair_rows, n_expert, \
@@ -14637,12 +14637,12 @@ int ds4_gpu_hc_split_sinkhorn_tensor(
         if (!mixbuf || !outbuf ||
             mix_tensor_bytes < mix_bytes ||
             out_tensor_bytes < mix_bytes) {
-            fprintf(stderr, "ds4: Metal HC split received undersized activation buffers\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal HC split received undersized activation buffers\n");
             return 0;
         }
         if (scale_offset > model_size || scale_bytes > model_size - scale_offset ||
             base_offset > model_size || mix_bytes > model_size - base_offset) {
-            fprintf(stderr, "ds4: Metal HC split parameter range is outside the mapped model\n");
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal HC split parameter range is outside the mapped model\n");
             return 0;
         }
 
@@ -14656,7 +14656,7 @@ int ds4_gpu_hc_split_sinkhorn_tensor(
         const uint64_t out_rows64 = out_tensor_bytes / mix_bytes;
         if (out_rows64 < n_rows64) n_rows64 = out_rows64;
         if (n_rows64 == 0 || n_rows64 > UINT32_MAX) {
-            fprintf(stderr, "ds4: Metal HC split row count is outside supported range\n");
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal HC split row count is outside supported range\n");
             return 0;
         }
 
@@ -14715,13 +14715,13 @@ static int ds4_gpu_hc_weighted_sum_strided(
         const uint64_t out_row_bytes = (uint64_t)n_embd * sizeof(float);
         const uint64_t out_tensor_bytes = ds4_gpu_tensor_bytes(out);
         if (out_row_bytes == 0 || out_tensor_bytes < out_row_bytes || out_tensor_bytes % out_row_bytes != 0) {
-            fprintf(stderr, "ds4: Metal HC weighted sum output size is not a whole token row\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal HC weighted sum output size is not a whole token row\n");
             return 0;
         }
 
         const uint64_t n_tokens64 = out_tensor_bytes / out_row_bytes;
         if (n_tokens64 == 0 || n_tokens64 > UINT32_MAX) {
-            fprintf(stderr, "ds4: Metal HC weighted sum token count is outside supported range\n");
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal HC weighted sum token count is outside supported range\n");
             return 0;
         }
 
@@ -14730,7 +14730,7 @@ static int ds4_gpu_hc_weighted_sum_strided(
             x_row_values > UINT64_MAX / sizeof(float) ||
             n_tokens64 > UINT64_MAX / (x_row_values * sizeof(float)) ||
             n_tokens64 > UINT64_MAX / ((uint64_t)n_hc * sizeof(float))) {
-            fprintf(stderr, "ds4: Metal HC weighted sum activation size overflow\n");
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal HC weighted sum activation size overflow\n");
             return 0;
         }
 
@@ -14741,7 +14741,7 @@ static int ds4_gpu_hc_weighted_sum_strided(
         if (!xbuf || !wbuf || !outbuf ||
             ds4_gpu_tensor_bytes(residual_hc) < x_bytes ||
             ds4_gpu_tensor_bytes(weights) < w_last) {
-            fprintf(stderr, "ds4: Metal HC weighted sum received undersized activation buffers\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal HC weighted sum received undersized activation buffers\n");
             return 0;
         }
 
@@ -14834,7 +14834,7 @@ int ds4_gpu_hc_split_weighted_sum_tensor(
         return 0;
     }
     if (n_hc != 4) {
-        fprintf(stderr, "ds4: Metal fused HC split/sum is specialized for HC=4\n");
+        ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal fused HC split/sum is specialized for HC=4\n");
         return 0;
     }
 
@@ -14852,7 +14852,7 @@ int ds4_gpu_hc_split_weighted_sum_tensor(
         const uint64_t out_tensor_bytes = ds4_gpu_tensor_bytes(out);
         if (out_row_bytes == 0 || out_tensor_bytes < out_row_bytes ||
             out_tensor_bytes % out_row_bytes != 0) {
-            fprintf(stderr, "ds4: Metal fused HC split/sum output size is not a whole token row\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal fused HC split/sum output size is not a whole token row\n");
             return 0;
         }
 
@@ -14860,7 +14860,7 @@ int ds4_gpu_hc_split_weighted_sum_tensor(
         if (n_rows64 == 0 || n_rows64 > UINT32_MAX ||
             n_rows64 > UINT64_MAX / mix_bytes ||
             n_rows64 > UINT64_MAX / residual_row_bytes) {
-            fprintf(stderr, "ds4: Metal fused HC split/sum row count is outside supported range\n");
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal fused HC split/sum row count is outside supported range\n");
             return 0;
         }
 
@@ -14870,13 +14870,13 @@ int ds4_gpu_hc_split_weighted_sum_tensor(
             ds4_gpu_tensor_bytes(mix) < mix_total_bytes ||
             ds4_gpu_tensor_bytes(split) < mix_total_bytes ||
             ds4_gpu_tensor_bytes(residual_hc) < residual_total_bytes) {
-            fprintf(stderr, "ds4: Metal fused HC split/sum received undersized activation buffers\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal fused HC split/sum received undersized activation buffers\n");
             return 0;
         }
 
         if (scale_offset > model_size || scale_bytes > model_size - scale_offset ||
             base_offset > model_size || mix_bytes > model_size - base_offset) {
-            fprintf(stderr, "ds4: Metal fused HC split/sum parameter range is outside the mapped model\n");
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal fused HC split/sum parameter range is outside the mapped model\n");
             return 0;
         }
 
@@ -14971,7 +14971,7 @@ int ds4_gpu_hc_split_weighted_sum_norm_tensor(
         const uint64_t out_tensor_bytes = ds4_gpu_tensor_bytes(out);
         if (out_row_bytes == 0 || out_tensor_bytes < out_row_bytes ||
             out_tensor_bytes % out_row_bytes != 0) {
-            fprintf(stderr, "ds4: Metal fused HC split/sum/norm output size is not a whole token row\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal fused HC split/sum/norm output size is not a whole token row\n");
             return 0;
         }
 
@@ -14979,7 +14979,7 @@ int ds4_gpu_hc_split_weighted_sum_norm_tensor(
         if (n_rows64 == 0 || n_rows64 > UINT32_MAX ||
             n_rows64 > UINT64_MAX / mix_bytes ||
             n_rows64 > UINT64_MAX / residual_row_bytes) {
-            fprintf(stderr, "ds4: Metal fused HC split/sum/norm row count is outside supported range\n");
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal fused HC split/sum/norm row count is outside supported range\n");
             return 0;
         }
 
@@ -14991,14 +14991,14 @@ int ds4_gpu_hc_split_weighted_sum_norm_tensor(
             ds4_gpu_tensor_bytes(split) < mix_total_bytes ||
             ds4_gpu_tensor_bytes(residual_hc) < residual_total_bytes ||
             ds4_gpu_tensor_bytes(norm_out) < out_total_bytes) {
-            fprintf(stderr, "ds4: Metal fused HC split/sum/norm received undersized activation buffers\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal fused HC split/sum/norm received undersized activation buffers\n");
             return 0;
         }
 
         if (scale_offset > model_size || scale_bytes > model_size - scale_offset ||
             base_offset > model_size || mix_bytes > model_size - base_offset ||
             norm_weight_offset > model_size || out_row_bytes > model_size - norm_weight_offset) {
-            fprintf(stderr, "ds4: Metal fused HC split/sum/norm parameter range is outside the mapped model\n");
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal fused HC split/sum/norm parameter range is outside the mapped model\n");
             return 0;
         }
 
@@ -15035,7 +15035,7 @@ int ds4_gpu_hc_split_weighted_sum_norm_tensor(
 
         NSUInteger nth = ds4_gpu_rms_norm_threads(n_embd);
         if (nth > pipeline.maxTotalThreadsPerThreadgroup) {
-            fprintf(stderr, "ds4: Metal fused HC split/sum/norm requires %lu threads but pipeline supports %lu\n",
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal fused HC split/sum/norm requires %lu threads but pipeline supports %lu\n",
                     (unsigned long)nth,
                     (unsigned long)pipeline.maxTotalThreadsPerThreadgroup);
             return 0;
@@ -15082,7 +15082,7 @@ int ds4_gpu_output_hc_weights_tensor(
 
     @autoreleasepool {
         if ((n_hc % 4u) != 0) {
-            fprintf(stderr, "ds4: Metal output HC weights requires a multiple-of-4 HC width\n");
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal output HC weights requires a multiple-of-4 HC width\n");
             return 0;
         }
 
@@ -15091,14 +15091,14 @@ int ds4_gpu_output_hc_weights_tensor(
         const uint64_t row_bytes = (uint64_t)n_hc * sizeof(float);
         const uint64_t out_tensor_bytes = ds4_gpu_tensor_bytes(out);
         if (row_bytes == 0 || out_tensor_bytes < row_bytes || out_tensor_bytes % row_bytes != 0) {
-            fprintf(stderr, "ds4: Metal output HC weights size is not a whole token row\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal output HC weights size is not a whole token row\n");
             return 0;
         }
 
         const uint64_t n_tokens64 = out_tensor_bytes / row_bytes;
         if (n_tokens64 == 0 || n_tokens64 > UINT32_MAX ||
             n_tokens64 > UINT64_MAX / row_bytes) {
-            fprintf(stderr, "ds4: Metal output HC weights token count is outside supported range\n");
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal output HC weights token count is outside supported range\n");
             return 0;
         }
 
@@ -15106,7 +15106,7 @@ int ds4_gpu_output_hc_weights_tensor(
         if (!prebuf || !outbuf ||
             ds4_gpu_tensor_bytes(pre) < bytes ||
             ds4_gpu_tensor_bytes(out) < bytes) {
-            fprintf(stderr, "ds4: Metal output HC weights received undersized buffers\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal output HC weights received undersized buffers\n");
             return 0;
         }
 
@@ -15219,13 +15219,13 @@ int ds4_gpu_hc_expand_tensor(
         const uint64_t hc_row_bytes = (uint64_t)n_hc * n_embd * sizeof(float);
         const uint64_t out_tensor_bytes = ds4_gpu_tensor_bytes(out_hc);
         if (hc_row_bytes == 0 || out_tensor_bytes < hc_row_bytes || out_tensor_bytes % hc_row_bytes != 0) {
-            fprintf(stderr, "ds4: Metal HC expand output size is not a whole HC token row\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal HC expand output size is not a whole HC token row\n");
             return 0;
         }
 
         const uint64_t n_tokens64 = out_tensor_bytes / hc_row_bytes;
         if (n_tokens64 == 0 || n_tokens64 > UINT32_MAX) {
-            fprintf(stderr, "ds4: Metal HC expand token count is outside supported range\n");
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal HC expand token count is outside supported range\n");
             return 0;
         }
 
@@ -15238,7 +15238,7 @@ int ds4_gpu_hc_expand_tensor(
             n_tokens64 > UINT64_MAX / (block_values * sizeof(float)) ||
             n_tokens64 > UINT64_MAX / (hc_values * sizeof(float)) ||
             n_tokens64 > UINT64_MAX / (comb_values * sizeof(float))) {
-            fprintf(stderr, "ds4: Metal HC expand activation size overflow\n");
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal HC expand activation size overflow\n");
             return 0;
         }
 
@@ -15251,7 +15251,7 @@ int ds4_gpu_hc_expand_tensor(
             ds4_gpu_tensor_bytes(residual_hc) < hc_bytes ||
             ds4_gpu_tensor_bytes(post) < post_bytes ||
             ds4_gpu_tensor_bytes(comb) < comb_bytes) {
-            fprintf(stderr, "ds4: Metal HC expand received undersized activation buffers\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal HC expand received undersized activation buffers\n");
             return 0;
         }
 
@@ -15327,13 +15327,13 @@ int ds4_gpu_hc_expand_split_tensor(
         const uint64_t hc_row_bytes = (uint64_t)n_hc * n_embd * sizeof(float);
         const uint64_t out_tensor_bytes = ds4_gpu_tensor_bytes(out_hc);
         if (hc_row_bytes == 0 || out_tensor_bytes < hc_row_bytes || out_tensor_bytes % hc_row_bytes != 0) {
-            fprintf(stderr, "ds4: Metal HC expand split output size is not a whole HC token row\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal HC expand split output size is not a whole HC token row\n");
             return 0;
         }
 
         const uint64_t n_tokens64 = out_tensor_bytes / hc_row_bytes;
         if (n_tokens64 == 0 || n_tokens64 > UINT32_MAX) {
-            fprintf(stderr, "ds4: Metal HC expand split token count is outside supported range\n");
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal HC expand split token count is outside supported range\n");
             return 0;
         }
 
@@ -15346,7 +15346,7 @@ int ds4_gpu_hc_expand_split_tensor(
             n_tokens64 > UINT64_MAX / (block_values * sizeof(float)) ||
             n_tokens64 > UINT64_MAX / (hc_values * sizeof(float)) ||
             n_tokens64 > UINT64_MAX / (mix_hc * sizeof(float))) {
-            fprintf(stderr, "ds4: Metal HC expand split activation size overflow\n");
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal HC expand split activation size overflow\n");
             return 0;
         }
 
@@ -15357,7 +15357,7 @@ int ds4_gpu_hc_expand_split_tensor(
             ds4_gpu_tensor_bytes(block_out) < block_bytes ||
             ds4_gpu_tensor_bytes(residual_hc) < hc_bytes ||
             ds4_gpu_tensor_bytes(split) < split_bytes) {
-            fprintf(stderr, "ds4: Metal HC expand split received undersized activation buffers\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal HC expand split received undersized activation buffers\n");
             return 0;
         }
 
@@ -15435,13 +15435,13 @@ int ds4_gpu_hc_expand_add_split_tensor(
         const uint64_t hc_row_bytes = (uint64_t)n_hc * n_embd * sizeof(float);
         const uint64_t out_tensor_bytes = ds4_gpu_tensor_bytes(out_hc);
         if (hc_row_bytes == 0 || out_tensor_bytes < hc_row_bytes || out_tensor_bytes % hc_row_bytes != 0) {
-            fprintf(stderr, "ds4: Metal HC expand add split output size is not a whole HC token row\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal HC expand add split output size is not a whole HC token row\n");
             return 0;
         }
 
         const uint64_t n_tokens64 = out_tensor_bytes / hc_row_bytes;
         if (n_tokens64 == 0 || n_tokens64 > UINT32_MAX) {
-            fprintf(stderr, "ds4: Metal HC expand add split token count is outside supported range\n");
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal HC expand add split token count is outside supported range\n");
             return 0;
         }
 
@@ -15454,7 +15454,7 @@ int ds4_gpu_hc_expand_add_split_tensor(
             n_tokens64 > UINT64_MAX / (block_values * sizeof(float)) ||
             n_tokens64 > UINT64_MAX / (hc_values * sizeof(float)) ||
             n_tokens64 > UINT64_MAX / (mix_hc * sizeof(float))) {
-            fprintf(stderr, "ds4: Metal HC expand add split activation size overflow\n");
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal HC expand add split activation size overflow\n");
             return 0;
         }
 
@@ -15466,7 +15466,7 @@ int ds4_gpu_hc_expand_add_split_tensor(
             ds4_gpu_tensor_bytes(block_add) < block_bytes ||
             ds4_gpu_tensor_bytes(residual_hc) < hc_bytes ||
             ds4_gpu_tensor_bytes(split) < split_bytes) {
-            fprintf(stderr, "ds4: Metal HC expand add split received undersized activation buffers\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal HC expand add split received undersized activation buffers\n");
             return 0;
         }
 
@@ -15563,7 +15563,7 @@ int ds4_gpu_shared_down_hc_expand_q8_0_tensor(
         const uint64_t split_bytes = mix_hc * sizeof(float);
 
         if (weight_offset > model_size || weight_bytes > model_size - weight_offset) {
-            fprintf(stderr, "ds4: Metal shared-down HC fusion weight range is outside the mapped model\n");
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal shared-down HC fusion weight range is outside the mapped model\n");
             return 0;
         }
         if (!midbuf || !sharedbuf || !routedbuf || !resbuf || !splitbuf || !outbuf ||
@@ -15573,7 +15573,7 @@ int ds4_gpu_shared_down_hc_expand_q8_0_tensor(
             ds4_gpu_tensor_bytes(residual_hc) < hc_bytes ||
             ds4_gpu_tensor_bytes(split) < split_bytes ||
             ds4_gpu_tensor_bytes(out_hc) < hc_bytes) {
-            fprintf(stderr, "ds4: Metal shared-down HC fusion received undersized buffers\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal shared-down HC fusion received undersized buffers\n");
             return 0;
         }
 
@@ -15680,7 +15680,7 @@ int ds4_gpu_matmul_q8_0_hc_expand_tensor(
         const uint64_t split_bytes = mix_hc * sizeof(float);
 
         if (weight_offset > model_size || weight_bytes > model_size - weight_offset) {
-            fprintf(stderr, "ds4: Metal Q8 HC fusion weight range is outside the mapped model\n");
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal Q8 HC fusion weight range is outside the mapped model\n");
             return 0;
         }
         if (!xbuf || !blockbuf || !resbuf || !splitbuf || !outbuf ||
@@ -15689,7 +15689,7 @@ int ds4_gpu_matmul_q8_0_hc_expand_tensor(
             ds4_gpu_tensor_bytes(residual_hc) < hc_bytes ||
             ds4_gpu_tensor_bytes(split) < split_bytes ||
             ds4_gpu_tensor_bytes(out_hc) < hc_bytes) {
-            fprintf(stderr, "ds4: Metal Q8 HC fusion received undersized buffers\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal Q8 HC fusion received undersized buffers\n");
             return 0;
         }
 
