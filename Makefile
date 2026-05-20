@@ -220,6 +220,9 @@ ds4_bench_cpu.o: ds4_bench.c ds4.h
 ds4_eval_cpu.o: ds4_eval.c ds4.h
 	$(CC) $(CFLAGS) -DDS4_NO_GPU -c -o $@ ds4_eval.c
 
+ds4_agent_cpu.o: ds4_agent.c ds4.h ds4_kvstore.h linenoise.h
+	$(CC) $(CFLAGS) -DDS4_NO_GPU -c -o $@ ds4_agent.c
+
 check-metal-sources: ds4_metal.m ds4_gpu.h $(METAL_EMBED) $(METAL_SRCS)
 	$(CC) $(OBJCFLAGS) -fsyntax-only ds4_metal.m
 
@@ -249,7 +252,13 @@ install-shared: shared
 	cp $(SHLIB) $(LIBDIR)/$(SHLIB)
 	@echo "installed $(SHLIB) -> $(LIBDIR)/$(SHLIB)"
 
-tests/cuda_long_context_smoke: tests/cuda_long_context_smoke.o ds4_cuda.o
+tests/ds4_gpu_log_stub.o: tests/ds4_gpu_log_stub.c
+	$(CC) $(CFLAGS) -c -o $@ tests/ds4_gpu_log_stub.c
+
+# The smoke test links ds4_cuda.o without the full engine.  ds4_cuda.o
+# references ds4_gpu_log (defined in ds4.c) for kernel diagnostics, so we
+# satisfy it with a tiny stderr-only stub instead of dragging ds4.o in.
+tests/cuda_long_context_smoke: tests/cuda_long_context_smoke.o tests/ds4_gpu_log_stub.o ds4_cuda.o
 	$(NVCC) $(NVCCFLAGS) -o $@ $^ $(CUDA_LDLIBS)
 
 # Test-flavored core object: identical to ds4.o except it also defines
@@ -272,4 +281,4 @@ test: ds4_test
 	./ds4_test
 
 clean:
-	rm -f ds4 ds4-server ds4-bench ds4-eval ds4-agent ds4_cpu ds4_native ds4_server_test ds4_test *.o libds4.dylib libds4.so libds4.dll tests/cuda_long_context_smoke tests/cuda_long_context_smoke.o
+	rm -f ds4 ds4-server ds4-bench ds4-eval ds4-agent ds4_cpu ds4_native ds4_server_test ds4_test *.o libds4.dylib libds4.so libds4.dll tests/cuda_long_context_smoke tests/cuda_long_context_smoke.o tests/ds4_gpu_log_stub.o
