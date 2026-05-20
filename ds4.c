@@ -401,9 +401,26 @@ typedef struct {
     char error[256];
 } ds4_cursor;
 
+/* Process-global fatal-invariant hook installed via ds4_abort_set().  Fires
+ * from ds4_die() / ds4_alloc_guard_check() just before abort().  Exists for
+ * embedders that cannot reliably intercept SIGABRT. */
+static ds4_abort_fn g_abort_fn;
+static void *g_abort_ud;
+
+void ds4_abort_set(ds4_abort_fn fn, void *ud) {
+    g_abort_fn = fn;
+    g_abort_ud = ud;
+}
+
+/* Internal-invariant abort.  The log callback is fired first so an embedder's
+ * structured log captures the message; the abort hook (if installed) gets the
+ * same text and may longjmp out — if it returns we still abort(), so the
+ * engine never continues with a broken invariant. */
+__attribute__((noreturn))
 static void ds4_die(const char *msg) {
-    fprintf(stderr, "ds4: %s\n", msg);
-    exit(1);
+    ds4_log(stderr, DS4_LOG_ERROR, "ds4: %s\n", msg);
+    if (g_abort_fn) g_abort_fn(g_abort_ud, msg);
+    abort();
 }
 
 /* Attention compression alternates after layer 1: dense early layers, then
@@ -448,13 +465,15 @@ static void ds4_alloc_guard_end(void) {
 
 static void ds4_alloc_guard_check(const char *op, size_t size) {
     if (!g_alloc_guard_enabled) return;
-    fprintf(stderr,
-            "ds4: internal allocation during %s: %s(%zu). "
-            "CPU decode is expected to reuse preallocated scratch buffers.\n",
-            g_alloc_guard_phase ? g_alloc_guard_phase : "guarded phase",
-            op,
-            size);
-    exit(1);
+    char buf[256];
+    snprintf(buf, sizeof(buf),
+             "internal allocation during %s: %s(%zu). "
+             "CPU decode is expected to reuse preallocated scratch buffers.",
+             g_alloc_guard_phase ? g_alloc_guard_phase : "guarded phase",
+             op, size);
+    ds4_log(stderr, DS4_LOG_ERROR, "ds4: %s\n", buf);
+    if (g_abort_fn) g_abort_fn(g_abort_ud, buf);
+    abort();
 }
 
 static void *xcalloc(size_t n, size_t size) {
@@ -18588,3 +18607,11 @@ int ds4_session_pos(ds4_session *s) {
 int ds4_session_ctx(ds4_session *s) {
     return s->ctx_size;
 }
+
+#ifdef DS4_TESTING
+/* Test-only entry into the internal fatal-invariant path.  Built only when
+ * ds4.c is compiled with -DDS4_TESTING for the unit-test binary (see the
+ * ds4_for_test.o rule in the Makefile); not present in production objects
+ * or in libds4.{so,dylib}. */
+void ds4_test_invoke_die(const char *msg) { ds4_die(msg); }
+#endif
