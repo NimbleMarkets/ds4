@@ -811,6 +811,16 @@ void ds4_log(FILE *fp, ds4_log_type type, const char *fmt, ...) {
     va_end(ap);
 }
 
+/* Backend diagnostics hook declared in ds4_gpu.h.  Thin wrapper over ds4_vlog
+ * so ds4_metal.m / ds4_cuda.cu can route their diagnostics through the same
+ * installable log callback without depending on ds4.h or ds4_log_type. */
+void ds4_gpu_log(int type, const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    ds4_vlog(stderr, (ds4_log_type)type, fmt, ap);
+    va_end(ap);
+}
+
 /* Fatal load error.  Writes the message into the caller's err/errlen out-param
  * (the convention already used across the session API) and emits the identical
  * text through the log callback at DS4_LOG_ERROR, so a structured return value
