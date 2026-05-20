@@ -130,6 +130,21 @@ void ds4_log(FILE *fp, ds4_log_type type, const char *fmt, ...);
  * `ud` is passed back to `fn` untouched and must outlive any engine that may log. */
 void ds4_log_set(ds4_log_fn fn, void *ud);
 
+/* Fatal-invariant handler.  Called from ds4_die() / ds4_alloc_guard_check()
+ * immediately before the engine calls abort().  `msg` is the same text routed
+ * through the log callback at DS4_LOG_ERROR moments earlier — passed again so
+ * the handler does not have to correlate with the log stream.
+ *
+ * The handler may longjmp/siglongjmp out, raise a host-level panic, or do
+ * any cleanup it likes.  If it returns, the engine calls abort() anyway —
+ * the contract is that the engine never continues with a broken invariant.
+ *
+ * This hook exists because runtimes that replace SIGABRT (Go cgo, certain
+ * JVMs, sandboxed embedders) cannot reliably intercept the signal-handler
+ * path.  Pass fn=NULL to restore the default (no handler — just abort). */
+typedef void (*ds4_abort_fn)(void *ud, const char *msg);
+void ds4_abort_set(ds4_abort_fn fn, void *ud);
+
 int ds4_engine_generate_argmax(ds4_engine *e, const ds4_tokens *prompt,
                                int n_predict, int ctx_size,
                                ds4_token_emit_fn emit,

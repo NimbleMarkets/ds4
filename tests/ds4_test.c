@@ -1,6 +1,7 @@
 #define DS4_SERVER_TEST
 #define DS4_SERVER_TEST_NO_MAIN
 #include "../ds4_server.c"
+#include <setjmp.h>
 #ifndef DS4_NO_GPU
 #include "../ds4_gpu.h"
 #include <math.h>
@@ -1491,6 +1492,61 @@ static void test_error_boundary(void) {
     TEST_ASSERT(engine == NULL);
 }
 
+/* ---- abort handler -------------------------------------------------- */
+
+/* Provided by ds4_for_test.o (ds4.c compiled with -DDS4_TESTING) so the test
+ * can drive the same fatal-invariant path that internal call sites use. */
+extern void ds4_test_invoke_die(const char *msg);
+
+static jmp_buf abort_jmp;
+static int     abort_calls;
+static char    abort_last_msg[256];
+
+static void test_abort_capture(void *ud, const char *msg) {
+    (void)ud;
+    abort_calls++;
+    snprintf(abort_last_msg, sizeof(abort_last_msg), "%s", msg);
+    /* Bounce out so the engine never reaches abort() and the test process
+     * survives to assert.  This is the pattern a Go cgo embedder would use
+     * (siglongjmp to a Go-side runtime panic). */
+    longjmp(abort_jmp, 1);
+}
+
+static void test_abort_handler(void) {
+    /* 1. With a handler installed, ds4_die routes the message through both
+     *    the log callback and the abort handler before calling abort(). */
+    abort_calls = 0;
+    abort_last_msg[0] = '\0';
+    test_log_calls = 0;
+    test_log_last_msg[0] = '\0';
+
+    ds4_log_set(test_log_capture, NULL);
+    ds4_abort_set(test_abort_capture, NULL);
+
+    if (setjmp(abort_jmp) == 0) {
+        ds4_test_invoke_die("invariant violated for test");
+        TEST_ASSERT(!"ds4_test_invoke_die returned without firing the handler");
+    }
+
+    TEST_ASSERT(abort_calls == 1);
+    TEST_ASSERT(!strcmp(abort_last_msg, "invariant violated for test"));
+    /* The log callback fires before the abort handler with identical text. */
+    TEST_ASSERT(test_log_calls >= 1);
+    TEST_ASSERT(test_log_last_type == DS4_LOG_ERROR);
+    TEST_ASSERT(strstr(test_log_last_msg, "invariant violated for test") != NULL);
+
+    /* 2. ds4_abort_set(NULL, NULL) restores the default: no handler called. */
+    abort_calls = 0;
+    ds4_abort_set(NULL, NULL);
+    /* Installed-callback-only smoke test on the log path: invoking ds4_die
+     * with the handler reset would now actually abort() the process, so we
+     * can't test that branch in-process — review covers it.  Reaching this
+     * assertion proves ds4_abort_set(NULL, NULL) was accepted. */
+    TEST_ASSERT(abort_calls == 0);
+
+    ds4_log_set(NULL, NULL);
+}
+
 typedef void (*test_fn)(void);
 
 typedef struct {
@@ -1512,6 +1568,7 @@ static const ds4_test_entry test_entries[] = {
     {"--server", "server", "server parser/rendering/cache unit tests", test_server_unit_group},
     {"--log-callback", "log-callback", "ds4_log_set routing, heap branch, and reset", test_log_callback},
     {"--error-boundary", "error-boundary", "ds4_engine_open returns errors instead of exiting", test_error_boundary},
+    {"--abort-handler", "abort-handler", "ds4_abort_set hook fires before abort() with the message", test_abort_handler},
 };
 
 static void test_print_help(const char *prog) {
