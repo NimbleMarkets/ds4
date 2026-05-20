@@ -265,11 +265,20 @@ install-shared: shared
 tests/cuda_long_context_smoke: tests/cuda_long_context_smoke.o ds4_cuda.o
 	$(NVCC) $(NVCCFLAGS) -o $@ $^ $(CUDA_LDLIBS)
 
-ds4_test: ds4_test.o ds4_help.o ds4_kvstore.o rax.o $(CORE_OBJS)
+# Test-flavored core object: identical to ds4.o except it also defines
+# ds4_test_invoke_die() so the unit-test binary can trigger ds4_die() from
+# outside the translation unit.  Production objects (ds4.o, ds4_pic.o) do
+# not get DS4_TESTING and therefore do not export this symbol.
+ds4_for_test.o: ds4.c ds4.h ds4_gpu.h
+	$(CC) $(CFLAGS) -DDS4_TESTING -c -o $@ ds4.c
+
+TEST_CORE_OBJS = $(subst ds4.o,ds4_for_test.o,$(CORE_OBJS))
+
+ds4_test: ds4_test.o ds4_help.o ds4_kvstore.o rax.o $(TEST_CORE_OBJS)
 ifeq ($(UNAME_S),Darwin)
-	$(CC) $(CFLAGS) -o $@ ds4_test.o ds4_help.o ds4_kvstore.o rax.o $(CORE_OBJS) $(METAL_LDLIBS)
+	$(CC) $(CFLAGS) -o $@ ds4_test.o ds4_help.o ds4_kvstore.o rax.o $(TEST_CORE_OBJS) $(METAL_LDLIBS)
 else
-	$(NVCC) $(NVCCFLAGS) -o $@ ds4_test.o ds4_help.o ds4_kvstore.o rax.o $(CORE_OBJS) $(CUDA_LDLIBS)
+	$(NVCC) $(NVCCFLAGS) -o $@ ds4_test.o ds4_help.o ds4_kvstore.o rax.o $(TEST_CORE_OBJS) $(CUDA_LDLIBS)
 endif
 
 test: ds4_test ds4-eval q4k-dot-test
