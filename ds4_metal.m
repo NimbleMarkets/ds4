@@ -698,25 +698,22 @@ static int ds4_gpu_moe_selected_trace_replay(
 }
 
 static int ds4_gpu_progress_enabled(void) {
-    return ds4_log_is_tty(stderr);
+    return ds4_gpu_log_has_callback() || ds4_gpu_log_is_tty();
 }
 
 static void ds4_gpu_progress_begin(const char *what) {
     if (!ds4_gpu_progress_enabled()) return;
     ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: %s...", what);
-    fflush(stderr);
 }
 
 static void ds4_gpu_progress_done(void) {
     if (!ds4_gpu_progress_enabled()) return;
-    fputs(" done\n", stderr);
-    fflush(stderr);
+    ds4_gpu_log(DS4_GPU_LOG_DEFAULT, " done\n");
 }
 
 static void ds4_gpu_progress_failed(void) {
     if (!ds4_gpu_progress_enabled()) return;
-    fputs(" failed\n", stderr);
-    fflush(stderr);
+    ds4_gpu_log(DS4_GPU_LOG_DEFAULT, " failed\n");
 }
 
 static void ds4_gpu_model_views_clear(void) {
@@ -1175,7 +1172,7 @@ static int ds4_gpu_env_bool(const char *name) {
     }
 
     if (!g_mpp_invalid_env_reported) {
-        fprintf(stderr,
+        ds4_gpu_log(DS4_GPU_LOG_WARNING,
                 "ds4: invalid Metal boolean environment value %s=%.*s; treating presence as enabled\n",
                 name, (int)n, v);
         g_mpp_invalid_env_reported = 1;
@@ -1205,7 +1202,7 @@ enum {
 static void ds4_gpu_warn_mpp_fallback(void) {
     static int warned;
     if (!warned) {
-        fprintf(stderr, "ds4: accelerated Metal prefill matmul unavailable; falling back to legacy kernel\n");
+        ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: accelerated Metal prefill matmul unavailable; falling back to legacy kernel\n");
         warned = 1;
     }
 }
@@ -1244,19 +1241,19 @@ static int ds4_gpu_compile_tensor_probe(void) {
         NSString *source = [NSString stringWithUTF8String:src];
         id<MTLLibrary> probe_library = [g_device newLibraryWithSource:source options:[MTLCompileOptions new] error:&error];
         if (!probe_library) {
-            fprintf(stderr, "ds4: Metal 4 tensor API probe compile failed: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal 4 tensor API probe compile failed: %s\n",
                     error ? [[error localizedDescription] UTF8String] : "(unknown)");
             return 0;
         }
         id<MTLFunction> fn = [probe_library newFunctionWithName:@"ds4_tensor_probe"];
         if (!fn) {
-            fprintf(stderr, "ds4: Metal 4 tensor API probe function missing\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal 4 tensor API probe function missing\n");
             return 0;
         }
         error = nil;
         id<MTLComputePipelineState> pipeline = [g_device newComputePipelineStateWithFunction:fn error:&error];
         if (!pipeline) {
-            fprintf(stderr, "ds4: Metal 4 tensor API probe pipeline failed: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal 4 tensor API probe pipeline failed: %s\n",
                     error ? [[error localizedDescription] UTF8String] : "(unknown)");
             return 0;
         }
@@ -1319,10 +1316,10 @@ static void ds4_gpu_detect_metal4_features(void) {
                 g_metal4_tensor_api_compile_supported = ds4_gpu_compile_tensor_probe();
                 g_metal4_tensor_api_enabled = g_metal4_tensor_api_compile_supported;
                 if (!g_metal4_tensor_api_enabled) {
-                    fprintf(stderr, "ds4: Metal 4 tensor API probe failed; using legacy Metal kernels\n");
+                    ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal 4 tensor API probe failed; using legacy Metal kernels\n");
                 }
             } else {
-                fprintf(stderr, "ds4: Metal 4 tensor API disabled for pre-M5/pre-A19 devices\n");
+                ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal 4 tensor API disabled for pre-M5/pre-A19 devices\n");
             }
         }
     }
@@ -3416,7 +3413,7 @@ int ds4_gpu_init(void) {
         NSMutableDictionary *macros = [NSMutableDictionary new];
         if (g_metal4_tensor_api_enabled) {
             macros[@"DS4_METAL_HAS_TENSOR"] = @"1";
-            fprintf(stderr, "ds4: Metal 4 tensor API enabled for Tensor kernels\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal 4 tensor API enabled for Tensor kernels\n");
         }
 
         const int drift_hc_stable        = ds4_gpu_env_bool("DS4_METAL_HC_STABLE")          != 0; // default ON
@@ -3436,13 +3433,13 @@ int ds4_gpu_init(void) {
             // sources but not to ship as a default.
             if (@available(macOS 15.0, *)) {
                 options.mathMode = MTLMathModeSafe;
-                fprintf(stderr, "ds4: Metal shader library math mode = safe (strict IEEE-754) by DS4_METAL_MATH_SAFE\n");
+                ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal shader library math mode = safe (strict IEEE-754) by DS4_METAL_MATH_SAFE\n");
             } else {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
                 options.fastMathEnabled = NO;
 #pragma clang diagnostic pop
-                fprintf(stderr, "ds4: Metal shader library fast-math disabled by DS4_METAL_MATH_SAFE (pre-macOS 15)\n");
+                ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal shader library fast-math disabled by DS4_METAL_MATH_SAFE (pre-macOS 15)\n");
             }
         }
 
@@ -3450,7 +3447,7 @@ int ds4_gpu_init(void) {
         if (drift_norm_unify)     macros[@"DS4_METAL_NORM_RSQRT_DISABLE"] = @"1";
         if (drift_kv_raw_f32)     macros[@"DS4_METAL_KV_RAW_F32"]         = @"1";
         if (drift_rope_exp2_log2) macros[@"DS4_METAL_ROPE_EXP2_LOG2"]     = @"1";
-        fprintf(stderr,
+        ds4_gpu_log(DS4_GPU_LOG_DEFAULT,
                 "ds4: drift-patch flags hc_stable=%s norm_unify=%s kv_raw_f32=%s rope_exp2_log2=%s math_safe=%s tensor_matmul=%s\n",
                 drift_hc_stable      ? "on"  : "off",
                 drift_norm_unify     ? "on"  : "off",
@@ -3705,7 +3702,7 @@ int ds4_gpu_init(void) {
 
         fn = [library newFunctionWithName:@"kernel_dsv4_moe_sum6_f32"];
         if (!fn) {
-            fprintf(stderr, "ds4: Metal kernel_dsv4_moe_sum6_f32 function not found\n");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: Metal kernel_dsv4_moe_sum6_f32 function not found\n");
             g_queue = nil;
             g_device = nil;
             return 0;
@@ -3713,7 +3710,7 @@ int ds4_gpu_init(void) {
 
         g_moe_sum6_pipeline = [g_device newComputePipelineStateWithFunction:fn error:&error];
         if (!g_moe_sum6_pipeline) {
-            fprintf(stderr, "ds4: Metal kernel_dsv4_moe_sum6_f32 pipeline failed: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal kernel_dsv4_moe_sum6_f32 pipeline failed: %s\n",
                     [[error localizedDescription] UTF8String]);
             g_queue = nil;
             g_device = nil;
@@ -5235,7 +5232,7 @@ static int ds4_gpu_flash_attn_stage_profile_boundary(
         strstr(stage, filter) != NULL ||
         (mode && strstr(mode, filter) != NULL);
     if (print_stage) {
-        fprintf(stderr,
+        ds4_gpu_log(DS4_GPU_LOG_DEFAULT,
                 "ds4: Metal FlashAttention prefill stage mode=%s tokens=%u comp=%u "
                 "keys=%u heads=%u dim=%u window=%u ratio=%u %s=%.3f ms\n",
                 mode ? mode : "unknown",
@@ -7384,7 +7381,7 @@ int ds4_gpu_matmul_q8_0_tensor(
             ok = 0;
         }
         const double elapsed_ms = ds4_gpu_now_ms() - profile_t0;
-        fprintf(stderr,
+        ds4_gpu_log(DS4_GPU_LOG_DEFAULT,
                 "ds4: Metal Q8_0 prefill profile %s in=%llu out=%llu tok=%llu %.3f ms\n",
                 profile_label ? profile_label : profile_fallback,
                 (unsigned long long)in_dim,
