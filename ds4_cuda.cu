@@ -26,6 +26,8 @@
  * the per-function extern "C" style used by the rest of this file).  Routes
  * each formatted line through the engine's installable log callback. */
 extern "C" void ds4_gpu_log(int type, const char *fmt, ...);
+extern "C" bool ds4_gpu_log_is_tty(void);
+extern "C" bool ds4_gpu_log_has_callback(void);
 #define DS4_GPU_LOG_DEFAULT 0
 #define DS4_GPU_LOG_WARNING 5
 #define DS4_GPU_LOG_ERROR   8
@@ -667,7 +669,7 @@ static void cuda_model_load_progress_note(uint64_t cached_bytes) {
     const double now = cuda_wall_sec();
     if (!g_model_load_progress_started) {
         g_model_load_progress_started = 1;
-        g_model_load_progress_tty = isatty(STDERR_FILENO) != 0;
+        g_model_load_progress_tty = !ds4_gpu_log_has_callback() && ds4_gpu_log_is_tty();
         g_model_load_progress_next = (g_model_load_progress_tty ? 2ull : 16ull) *
                                      1024ull * 1024ull * 1024ull;
         g_model_load_progress_last = now;
@@ -690,7 +692,6 @@ static void cuda_model_load_progress_note(uint64_t cached_bytes) {
         ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: CUDA loading model tensors %.2f GiB cached\n",
                 (double)cached_bytes / 1073741824.0);
     }
-    fflush(stderr);
     g_model_load_progress_last = now;
     const uint64_t step = (g_model_load_progress_tty ? 2ull : 16ull) *
                           1024ull * 1024ull * 1024ull;

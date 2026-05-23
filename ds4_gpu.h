@@ -28,6 +28,8 @@ void ds4_gpu_cleanup(void);
 #define DS4_GPU_LOG_WARNING 5
 #define DS4_GPU_LOG_ERROR   8
 void ds4_gpu_log(int type, const char *fmt, ...);
+bool ds4_gpu_log_is_tty(void);
+bool ds4_gpu_log_has_callback(void);
 
 ds4_gpu_tensor *ds4_gpu_tensor_alloc(uint64_t bytes);
 ds4_gpu_tensor *ds4_gpu_tensor_alloc_managed(uint64_t bytes);
