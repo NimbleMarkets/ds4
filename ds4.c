@@ -2714,7 +2714,12 @@ static bool required_u32(const ds4_model *m, const char *key, uint32_t *out,
     return true;
 }
 
-static bool required_f32(const ds4_model *m, const char *key) {
+static bool required_f32(const ds4_model *m, const char *key, float *out,
+                         char *err, size_t errlen) {
+    if (!model_get_f32_compat(m, key, out)) {
+        return ds4_fail(err, errlen, "required metadata key is missing: %s", key);
+    }
+    return true;
 }
 
 static bool required_bool(const ds4_model *m, const char *key, bool *out,
@@ -3215,7 +3220,7 @@ static bool ds4_shape_matches_metadata(
            s->n_hc_sinkhorn_iter == n_hc_sinkhorn_iter;
 }
 
-static void ds4_select_shape_from_metadata(
+static bool ds4_select_shape_from_metadata(
         uint32_t n_layer,
         uint32_t n_embd,
         uint32_t n_vocab,
@@ -3237,7 +3242,8 @@ static void ds4_select_shape_from_metadata(
         uint32_t n_indexer_head_dim,
         uint32_t n_indexer_top_k,
         uint32_t n_hc,
-        uint32_t n_hc_sinkhorn_iter) {
+        uint32_t n_hc_sinkhorn_iter,
+        char *err, size_t errlen) {
     if (ds4_shape_matches_metadata(&DS4_SHAPE_FLASH,
                                    n_layer, n_embd, n_vocab, n_head, n_head_kv,
                                    n_head_dim, n_value_dim, n_rot, n_lora_q,
@@ -3247,7 +3253,7 @@ static void ds4_select_shape_from_metadata(
                                    n_indexer_head_dim, n_indexer_top_k, n_hc,
                                    n_hc_sinkhorn_iter)) {
         g_ds4_shape = DS4_SHAPE_FLASH;
-        return;
+        return true;
     }
     if (ds4_shape_matches_metadata(&DS4_SHAPE_PRO,
                                    n_layer, n_embd, n_vocab, n_head, n_head_kv,
@@ -3258,10 +3264,10 @@ static void ds4_select_shape_from_metadata(
                                    n_indexer_head_dim, n_indexer_top_k, n_hc,
                                    n_hc_sinkhorn_iter)) {
         g_ds4_shape = DS4_SHAPE_PRO;
-        return;
+        return true;
     }
 
-    fprintf(stderr,
+    return ds4_fail(err, errlen,
             "ds4: unsupported DeepSeek4 shape: layers=%u embd=%u heads=%u "
             "q_lora=%u out_groups=%u experts=%u ff_exp=%u indexer_top_k=%u\n",
             n_layer,
@@ -3272,7 +3278,6 @@ static void ds4_select_shape_from_metadata(
             n_expert,
             n_ff_exp,
             n_indexer_top_k);
-    exit(1);
 }
 
 static bool validate_compress_ratio_metadata(const ds4_model *m, char *err, size_t errlen) {
@@ -3404,7 +3409,7 @@ static bool config_validate_model(const ds4_model *m, char *err, size_t errlen) 
         !required_u32(m, "deepseek4.attention.indexer.key_length", &n_indexer_head_dim, err, errlen) ||
         !required_u32(m, "deepseek4.attention.indexer.top_k", &n_indexer_top_k, err, errlen) ||
         !required_u32(m, "deepseek4.hyper_connection.count", &n_hc, err, errlen) ||
-        !required_u32(m, "deepseek4.hyper_connection.sinkhorn_iterations", &n_hc_sinkhorn_iter, err, errlen) {
+        !required_u32(m, "deepseek4.hyper_connection.sinkhorn_iterations", &n_hc_sinkhorn_iter, err, errlen)) {
         return false;
     }
 
@@ -3430,7 +3435,8 @@ static bool config_validate_model(const ds4_model *m, char *err, size_t errlen) 
                                    n_indexer_head_dim,
                                    n_indexer_top_k,
                                    n_hc,
-                                   n_hc_sinkhorn_iter)) return false;
+                                   n_hc_sinkhorn_iter,
+                                   err, errlen)) return false;
 
     if (!config_expect_u32("embedding_length",           n_embd,          DS4_N_EMBD, err, errlen) ||
         !config_expect_u32("vocab_size",                 n_vocab,         DS4_N_VOCAB, err, errlen) ||
@@ -3451,15 +3457,6 @@ static bool config_validate_model(const ds4_model *m, char *err, size_t errlen) 
         !config_expect_u32("expert_group_used_count",    n_group_used, 0, err, errlen)) {
         return false;
     }
-
-
-
-    config_expect_u32("attention.sliding_window",     n_swa,                   DS4_N_SWA);
-    config_expect_u32("attention.indexer.head_count", n_indexer_head,     DS4_N_INDEXER_HEAD);
-    config_expect_u32("attention.indexer.key_length", n_indexer_head_dim, DS4_N_INDEXER_HEAD_DIM);
-    config_expect_u32("attention.indexer.top_k",      n_indexer_top_k,    DS4_N_INDEXER_TOP_K);
-    config_expect_u32("hyper_connection.count", n_hc, DS4_N_HC);
-    config_expect_u32("hyper_connection.sinkhorn_iterations", n_hc_sinkhorn_iter, DS4_N_HC_SINKHORN_ITER);
  
     if (!config_expect_u32("attention.sliding_window",     n_swa,              DS4_N_SWA, err, errlen) ||
         !config_expect_u32("attention.indexer.head_count", n_indexer_head,     DS4_N_INDEXER_HEAD, err, errlen) ||
@@ -3474,18 +3471,6 @@ static bool config_validate_model(const ds4_model *m, char *err, size_t errlen) 
         !validate_swiglu_clamp_metadata(m, err, errlen)) {
         return false;
     }
-
-    uint64_t rope_orig_ctx = 0;
-    if (!required_u64(m, "deepseek4.rope.scaling.original_context_length",
-                      &rope_orig_ctx, err, errlen)) {
-        return false;
-    }
-    if (rope_orig_ctx != DS4_ROPE_ORIG_CTX)
-        return ds4_fail(err, errlen,
-                        "expected rope.scaling.original_context_length=%" PRIu64
-                        " for DeepSeek4 Flash, got %" PRIu64,
-                        (uint64_t)DS4_ROPE_ORIG_CTX, rope_orig_ctx);
-
 
     uint64_t rope_orig_ctx = DS4_ROPE_ORIG_CTX;
     model_get_u64_compat(m, "deepseek4.rope.scaling.original_context_length", &rope_orig_ctx);
