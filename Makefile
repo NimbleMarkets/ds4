@@ -103,10 +103,10 @@ cpu: ds4_cli_cpu.o ds4_server_cpu.o ds4_bench_cpu.o ds4_eval_cpu.o ds4_agent_cpu
 	$(CC) $(CFLAGS) -o ds4-eval ds4_eval_cpu.o ds4_help.o $(CPU_CORE_OBJS) $(LDLIBS)
 	$(CC) $(CFLAGS) -o ds4-agent ds4_agent_cpu.o ds4_help.o ds4_web.o ds4_kvstore.o linenoise.o $(CPU_CORE_OBJS) $(LDLIBS)
 
-shared: ds4_pic.o ds4_metal_pic.o
+shared: ds4_pic.o ds4_distributed_pic.o ds4_metal_pic.o
 	$(CC) $(CFLAGS) -fPIC -dynamiclib -install_name @rpath/$(SHLIB) -o $(SHLIB) $^ $(METAL_LDLIBS)
 
-shared-cpu: ds4_cpu_pic.o
+shared-cpu: ds4_cpu_pic.o ds4_distributed_pic.o
 	$(CC) $(CFLAGS) -fPIC -dynamiclib -install_name @rpath/$(SHLIB) -o $(SHLIB) $^ $(LDLIBS)
 
 cuda-regression:
@@ -163,10 +163,10 @@ cpu: ds4_cli_cpu.o ds4_server_cpu.o ds4_bench_cpu.o ds4_eval_cpu.o ds4_agent_cpu
 	$(CC) $(CFLAGS) -o ds4-eval ds4_eval_cpu.o ds4_help.o $(CPU_CORE_OBJS) $(LDLIBS)
 	$(CC) $(CFLAGS) -o ds4-agent ds4_agent_cpu.o ds4_help.o ds4_web.o ds4_kvstore.o linenoise.o $(CPU_CORE_OBJS) $(LDLIBS)
 
-shared: ds4_pic.o ds4_cuda_pic.o
+shared: ds4_pic.o ds4_distributed_pic.o ds4_cuda_pic.o
 	$(NVCC) $(NVCCFLAGS) -Xcompiler -fPIC --shared -o $(SHLIB) $^ $(CUDA_LDLIBS)
 
-shared-cpu: ds4_cpu_pic.o
+shared-cpu: ds4_cpu_pic.o ds4_distributed_pic.o
 	$(CC) $(CFLAGS) -fPIC -shared -Wl,-soname,$(SHLIB) -o $(SHLIB) $^ $(LDLIBS)
 
 cuda-regression: tests/cuda_long_context_smoke
@@ -249,6 +249,9 @@ ds4_pic.o: ds4.c ds4.h ds4_gpu.h
 
 ds4_cpu_pic.o: ds4.c ds4.h ds4_gpu.h
 	$(CC) $(CFLAGS) -fPIC -DDS4_NO_GPU -c -o $@ ds4.c
+
+ds4_distributed_pic.o: ds4_distributed.c ds4_distributed.h ds4.h
+	$(CC) $(CFLAGS) -fPIC -c -o $@ ds4_distributed.c
 
 ds4_metal_pic.o: ds4_metal.m ds4_gpu.h $(METAL_EMBED) $(METAL_SRCS)
 	$(CC) $(OBJCFLAGS) -fPIC -c -o $@ ds4_metal.m
