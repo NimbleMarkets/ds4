@@ -258,11 +258,11 @@ static const char *cuda_model_range_register_mapped(const void *model_map,
             g_model_ranges.push_back({model_map, offset, bytes, dev_ptr, (void *)reg_addr, (char *)reg_dev, reg_bytes, 1, 0});
             g_model_range_by_offset[offset] = g_model_ranges.size() - 1u;
             if (getenv("DS4_CUDA_WEIGHT_CACHE_VERBOSE")) {
-                ds4_log(stderr, DS4_LOG_ERROR, "ds4: CUDA mapped %s %.2f MiB\n",
+                ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: CUDA mapped %s %.2f MiB\n",
                         what ? what : "weights",
                         (double)bytes / 1048576.0);
             }
-            fprintf(stderr, "ds4: CUDA model range map pointer failed for %s: %s\n",
+            ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: CUDA model range map pointer failed for %s: %s\n",
                     what ? what : "weights", cudaGetErrorString(err));
             (void)cudaHostUnregister((void *)reg_addr);
             (void)cudaGetLastError();
@@ -270,7 +270,7 @@ static const char *cuda_model_range_register_mapped(const void *model_map,
             if (err == cudaErrorNotSupported || err == cudaErrorInvalidValue) g_model_range_mapping_supported = 0;
             (void)cudaGetLastError();
         }
-        fprintf(stderr, "ds4: CUDA model range map pointer failed for %s: %s\n",
+        ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: CUDA model range map pointer failed for %s: %s\n",
                 what ? what : "weights", cudaGetErrorString(err));
         (void)cudaHostUnregister((void *)reg_addr);
         (void)cudaGetLastError();
@@ -281,7 +281,7 @@ static const char *cuda_model_range_register_mapped(const void *model_map,
         g_model_range_mapping_supported = 0;
     }
     if (getenv("DS4_CUDA_WEIGHT_CACHE_VERBOSE")) {
-        fprintf(stderr, "ds4: CUDA model range map skipped for %s: %s\n",
+        ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: CUDA model range map skipped for %s: %s\n",
                 what ? what : "weights", cudaGetErrorString(err));
     }
     (void)cudaGetLastError();
@@ -299,7 +299,7 @@ static const char *cuda_model_range_populate_device_copy(const void *model_map,
     const uint64_t limit = cuda_model_cache_limit_bytes();
     if (g_model_range_bytes > limit || bytes > limit - g_model_range_bytes) {
         if (getenv("DS4_CUDA_WEIGHT_CACHE_VERBOSE")) {
-            fprintf(stderr, "ds4: CUDA skipped device copy for %s %.2f MiB (cache budget %.2f GiB exhausted)\n",
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: CUDA skipped device copy for %s %.2f MiB (cache budget %.2f GiB exhausted)\n",
                     what ? what : "weights",
                     (double)bytes / 1048576.0,
                     (double)limit / 1073741824.0);
@@ -759,8 +759,7 @@ static void cuda_model_load_progress_note(uint64_t cached_bytes) {
                                      1024ull * 1024ull * 1024ull;
         g_model_load_progress_last = now;
         if (g_model_load_progress_tty) {
-            ds4_log(stderr, DS4_LOG_ERROR, "\r\033[Kds4: CUDA loading model tensors into device cache: 0.00 GiB");
-            ds4_log(stderr, DS4_LOG_ERROR, "\r\033[Kds4: CUDA loading model tensors into device cache: 0.00 GiB");
+            ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "\r\033[Kds4: CUDA loading model tensors into device cache: 0.00 GiB");
         } else {
             ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: CUDA loading model tensors into device cache\n");
         }
@@ -772,7 +771,7 @@ static void cuda_model_load_progress_note(uint64_t cached_bytes) {
     }
 
     if (g_model_load_progress_tty) {
-        ds4_log(stderr, DS4_LOG_ERROR, "\r\033[Kds4: CUDA loading model tensors into device cache: %.2f GiB",
+        ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "\r\033[Kds4: CUDA loading model tensors into device cache: %.2f GiB",
                 (double)cached_bytes / 1073741824.0);
     } else {
         ds4_gpu_log(DS4_GPU_LOG_DEFAULT, "ds4: CUDA loading model tensors %.2f GiB cached\n",
@@ -1635,7 +1634,7 @@ extern "C" int ds4_gpu_set_model_map(const void *model_map, uint64_t model_size)
         (void)cudaGetLastError();
         const uint64_t limit = cuda_model_local_model_limit_bytes();
         if (!cuda_model_cache_limit_explicit() && model_size > limit) {
-            fprintf(stderr,
+            ds4_gpu_log(DS4_GPU_LOG_ERROR,
                     "ds4: CUDA model %.2f GiB exceeds the default single-GPU "
                     "startup cache budget %.2f GiB; use distributed layer "
                     "loading or set DS4_CUDA_WEIGHT_CACHE_LIMIT_GB explicitly\n",
@@ -1746,7 +1745,7 @@ extern "C" int ds4_gpu_cache_model_range(const void *model_map, uint64_t model_s
     const char *ptr = cuda_model_range_ptr(model_map, offset, bytes, label ? label : "model_tensor");
     if (!ptr || !cuda_model_range_is_cached(model_map, offset, bytes)) {
         if (!g_model_mapping_failure_notice_printed) {
-            fprintf(stderr,
+            ds4_gpu_log(DS4_GPU_LOG_ERROR,
                     "ds4: CUDA failed to prepare model tensor spans for device access\n");
             g_model_mapping_failure_notice_printed = 1;
         }

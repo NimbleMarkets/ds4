@@ -1055,8 +1055,10 @@ static int dist_set_socket_low_latency(int fd) {
 
 #ifdef DS4_DIST_TRACE
 #define DIST_DEBUG(...) do { \
-    fprintf(stderr, "ds4: distributed debug: " __VA_ARGS__); \
-    fputc('\n', stderr); \
+    char ds4_dist_dbg_buf__[1024]; \
+    snprintf(ds4_dist_dbg_buf__, sizeof(ds4_dist_dbg_buf__), \
+             "ds4: distributed debug: " __VA_ARGS__); \
+    ds4_log(stderr, DS4_LOG_DEFAULT, "%s\n", ds4_dist_dbg_buf__); \
 } while (0)
 #else
 #define DIST_DEBUG(...) ((void)0)
@@ -1825,7 +1827,7 @@ static bool dist_coordinator_debug_enabled(const ds4_dist_coordinator_state *sta
 }
 
 #define DIST_COORD_DEBUG(state, ...) do { \
-    if (dist_coordinator_debug_enabled(state)) fprintf(stderr, __VA_ARGS__); \
+    if (dist_coordinator_debug_enabled(state)) ds4_log(stderr, DS4_LOG_DEFAULT, __VA_ARGS__); \
 } while (0)
 
 /* =========================================================================
@@ -1983,7 +1985,7 @@ static void dist_coordinator_report_plan(ds4_dist_coordinator_state *state) {
         free(workers);
         free(path);
         pthread_mutex_unlock(&state->mu);
-        fprintf(stderr, "ds4: distributed coordinator: out of memory building route plan\n");
+        ds4_log(stderr, DS4_LOG_ERROR, "ds4: distributed coordinator: out of memory building route plan\n");
         return;
     }
     uint32_t i = 0;
@@ -2054,9 +2056,9 @@ static void dist_coordinator_report_plan(ds4_dist_coordinator_state *state) {
     pthread_mutex_unlock(&state->mu);
 
     if (complete) {
-        fprintf(stderr, "ds4: distributed coordinator: complete route ready: %s\n", plan);
+        ds4_log(stderr, DS4_LOG_OK, "ds4: distributed coordinator: complete route ready: %s\n", plan);
     } else {
-        fprintf(stderr, "ds4: distributed coordinator: route incomplete; next needed layer %u\n", missing);
+        ds4_log(stderr, DS4_LOG_DEFAULT, "ds4: distributed coordinator: route incomplete; next needed layer %u\n", missing);
     }
     free(path);
     free(workers);
@@ -2854,7 +2856,7 @@ static int dist_write_logits_dump(
         const float *logits) {
     FILE *fp = fopen(gen->dump_logits_path, "wb");
     if (!fp) {
-        fprintf(stderr, "ds4: failed to open distributed --dump-logits file: %s\n",
+        ds4_log(stderr, DS4_LOG_ERROR, "ds4: failed to open distributed --dump-logits file: %s\n",
                 gen->dump_logits_path);
         return 1;
     }
@@ -2885,7 +2887,7 @@ static int dist_write_logits_dump(
     }
     fputs("\n  ]\n}\n", fp);
     if (fclose(fp) != 0) {
-        fprintf(stderr, "ds4: failed to close distributed --dump-logits file: %s\n",
+        ds4_log(stderr, DS4_LOG_ERROR, "ds4: failed to close distributed --dump-logits file: %s\n",
                 gen->dump_logits_path);
         return 1;
     }
@@ -2981,7 +2983,7 @@ static int dist_write_logprobs_dump(
         float *logits) {
     FILE *fp = fopen(gen->dump_logprobs_path, "wb");
     if (!fp) {
-        fprintf(stderr, "ds4: failed to open distributed --dump-logprobs file: %s\n",
+        ds4_log(stderr, DS4_LOG_ERROR, "ds4: failed to open distributed --dump-logprobs file: %s\n",
                 gen->dump_logprobs_path);
         return 1;
     }
@@ -3040,7 +3042,7 @@ static int dist_write_logprobs_dump(
                                        &token, 1, token_pos,
                                        session_id, (*request_id)++,
                                        false, logits, err, sizeof(err)) != 0) {
-            fprintf(stderr,
+            ds4_log(stderr, DS4_LOG_ERROR,
                     "ds4: distributed decode failed while dumping logprobs: %s\n",
                     err);
             if (dist_coordinator_rebuild_from_transcript(state,
@@ -3054,7 +3056,7 @@ static int dist_write_logprobs_dump(
                                                          true,
                                                          err,
                                                          sizeof(err)) != 0) {
-                fprintf(stderr,
+                ds4_log(stderr, DS4_LOG_ERROR,
                         "ds4: distributed recovery failed while dumping logprobs: %s\n",
                         err);
                 rc = 1;
@@ -3064,7 +3066,7 @@ static int dist_write_logprobs_dump(
     }
     fputs("\n  ]\n}\n", fp);
     if (fclose(fp) != 0) {
-        fprintf(stderr, "ds4: failed to close distributed --dump-logprobs file: %s\n",
+        ds4_log(stderr, DS4_LOG_ERROR, "ds4: failed to close distributed --dump-logprobs file: %s\n",
                 gen->dump_logprobs_path);
         rc = 1;
     }
@@ -3832,7 +3834,7 @@ static int dist_replay_check_logits(
         }
     }
     if (mismatches != 0) {
-        fprintf(stderr,
+        ds4_log(stderr, DS4_LOG_ERROR,
                 "ds4: distributed replay check failed: mismatches=%u max_abs=%g token=%d before=%g after=%g\n",
                 mismatches,
                 max_abs,
@@ -3841,7 +3843,7 @@ static int dist_replay_check_logits(
                 after[max_i]);
         return 1;
     }
-    fprintf(stderr, "ds4: distributed replay check passed: logits exact match across reset/replay\n");
+    ds4_log(stderr, DS4_LOG_OK, "ds4: distributed replay check passed: logits exact match across reset/replay\n");
     return 0;
 }
 
@@ -3852,13 +3854,13 @@ static int dist_run_coordinator_generation(
     ds4_dist_route_plan plan;
     uint64_t plan_generation = 0;
     if (!dist_coordinator_ensure_route(state, &plan, &plan_generation, err, sizeof(err))) {
-        fprintf(stderr, "ds4: distributed coordinator: %s\n", err);
+        ds4_log(stderr, DS4_LOG_ERROR, "ds4: distributed coordinator: %s\n", err);
         return 1;
     }
 
     ds4_session *session = NULL;
     if (ds4_session_create(&session, state->engine, gen->ctx_size) != 0) {
-        fprintf(stderr, "ds4: distributed coordinator: failed to create local session\n");
+        ds4_log(stderr, DS4_LOG_ERROR, "ds4: distributed coordinator: failed to create local session\n");
         dist_route_plan_free(&plan);
         return 1;
     }
@@ -3870,7 +3872,7 @@ static int dist_run_coordinator_generation(
         ds4_encode_chat_prompt(state->engine, gen->system, gen->prompt, gen->think_mode, &prompt);
     }
     if (prompt.len <= 0) {
-        fprintf(stderr, "ds4: distributed coordinator: empty prompt\n");
+        ds4_log(stderr, DS4_LOG_ERROR, "ds4: distributed coordinator: empty prompt\n");
         ds4_session_free(session);
         dist_route_plan_free(&plan);
         return 1;
@@ -3880,7 +3882,7 @@ static int dist_run_coordinator_generation(
     uint64_t request_id = 1;
     float *logits = malloc((size_t)ds4_engine_vocab_size(state->engine) * sizeof(float));
     if (!logits) {
-        fprintf(stderr, "ds4: distributed coordinator: out of memory allocating logits\n");
+        ds4_log(stderr, DS4_LOG_ERROR, "ds4: distributed coordinator: out of memory allocating logits\n");
         ds4_tokens_free(&prompt);
         ds4_session_free(session);
         dist_route_plan_free(&plan);
@@ -3897,7 +3899,7 @@ static int dist_run_coordinator_generation(
                                                      err,
                                                      sizeof(err));
     if (prefill_rc != 0) {
-        fprintf(stderr,
+        ds4_log(stderr, DS4_LOG_ERROR,
                 "ds4: distributed prompt processing failed: %s\n",
                 err);
         if (dist_coordinator_rebuild_from_transcript(state,
@@ -3911,7 +3913,7 @@ static int dist_run_coordinator_generation(
                                                      prefill_rc != DS4_DIST_RECV_REMOTE_ERROR,
                                                      err,
                                                      sizeof(err)) != 0) {
-            fprintf(stderr,
+            ds4_log(stderr, DS4_LOG_ERROR,
                     "ds4: distributed prompt recovery failed: %s\n",
                     err);
             free(logits);
@@ -3926,7 +3928,7 @@ static int dist_run_coordinator_generation(
         const size_t logits_bytes = (size_t)ds4_engine_vocab_size(state->engine) * sizeof(logits[0]);
         float *before = malloc(logits_bytes);
         if (!before) {
-            fprintf(stderr, "ds4: distributed replay check: out of memory allocating logits copy\n");
+            ds4_log(stderr, DS4_LOG_ERROR, "ds4: distributed replay check: out of memory allocating logits copy\n");
             free(logits);
             ds4_tokens_free(&prompt);
             ds4_session_free(session);
@@ -3944,7 +3946,7 @@ static int dist_run_coordinator_generation(
                                                                 err,
                                                                 sizeof(err));
         if (replay_prefill_rc != 0) {
-            fprintf(stderr,
+            ds4_log(stderr, DS4_LOG_ERROR,
                     "ds4: distributed replay prompt processing failed: %s\n",
                     err);
             if (dist_coordinator_rebuild_from_transcript(state,
@@ -3958,7 +3960,7 @@ static int dist_run_coordinator_generation(
                                                          replay_prefill_rc != DS4_DIST_RECV_REMOTE_ERROR,
                                                          err,
                                                          sizeof(err)) != 0) {
-                fprintf(stderr,
+                ds4_log(stderr, DS4_LOG_ERROR,
                         "ds4: distributed replay recovery failed: %s\n",
                         err);
                 free(before);
@@ -4040,7 +4042,7 @@ static int dist_run_coordinator_generation(
                                                    session_id, request_id++,
                                                    false, logits, err, sizeof(err));
         if (decode_rc != 0) {
-            fprintf(stderr, "\nds4: distributed decode failed: %s\n", err);
+            ds4_log(stderr, DS4_LOG_ERROR, "\nds4: distributed decode failed: %s\n", err);
             if (dist_coordinator_rebuild_from_transcript(state,
                                                          session,
                                                          &plan,
@@ -4052,7 +4054,7 @@ static int dist_run_coordinator_generation(
                                                          decode_rc != DS4_DIST_RECV_REMOTE_ERROR,
                                                          err,
                                                          sizeof(err)) != 0) {
-                fprintf(stderr, "ds4: distributed decode recovery failed: %s\n", err);
+                ds4_log(stderr, DS4_LOG_ERROR, "ds4: distributed decode recovery failed: %s\n", err);
                 ds4_tokens_free(&transcript);
                 free(logits);
                 ds4_tokens_free(&prompt);
@@ -5676,7 +5678,7 @@ static int dist_run_coordinator(ds4_engine *engine, const ds4_dist_options *opt,
     char err[256];
     int listen_fd = dist_open_listener(opt->listen_host, opt->listen_port, err, sizeof(err));
     if (listen_fd < 0) {
-        fprintf(stderr, "ds4: distributed coordinator: %s\n", err);
+        ds4_log(stderr, DS4_LOG_ERROR, "ds4: distributed coordinator: %s\n", err);
         return 1;
     }
 
@@ -5722,7 +5724,7 @@ static int dist_run_coordinator(ds4_engine *engine, const ds4_dist_options *opt,
 
     pthread_t accept_tid;
     if (pthread_create(&accept_tid, NULL, dist_coordinator_accept_main, &accept_ctx) != 0) {
-        fprintf(stderr, "ds4: distributed coordinator: pthread_create failed for accept loop\n");
+        ds4_log(stderr, DS4_LOG_ERROR, "ds4: distributed coordinator: pthread_create failed for accept loop\n");
         close(listen_fd);
         return 1;
     }
@@ -5746,7 +5748,7 @@ static int dist_worker_read_loop(ds4_dist_worker_state *state, int fd) {
         int rc = dist_read_frame_header(fd, &type, &bytes, err, sizeof(err));
         if (rc == 0) break;
         if (rc < 0) {
-            fprintf(stderr, "ds4: distributed worker: protocol error: %s\n", err);
+            ds4_log(stderr, DS4_LOG_ERROR, "ds4: distributed worker: protocol error: %s\n", err);
             loop_rc = 1;
             break;
         }
@@ -5760,7 +5762,7 @@ static int dist_worker_read_loop(ds4_dist_worker_state *state, int fd) {
             }
             msg[n] = '\0';
             if (bytes > n) dist_discard_bytes(fd, bytes - n);
-            fprintf(stderr, "ds4: distributed worker: coordinator error: %s\n", msg);
+            ds4_log(stderr, DS4_LOG_ERROR, "ds4: distributed worker: coordinator error: %s\n", msg);
             loop_rc = 1;
             break;
         }
@@ -5796,7 +5798,7 @@ static int dist_worker_read_loop(ds4_dist_worker_state *state, int fd) {
         pthread_mutex_lock(&upstream.write_mu);
         dist_send_error(fd, "unsupported distributed worker frame");
         pthread_mutex_unlock(&upstream.write_mu);
-        fprintf(stderr, "ds4: distributed worker: rejected unsupported frame type %u\n", type);
+        ds4_log(stderr, DS4_LOG_WARNING, "ds4: distributed worker: rejected unsupported frame type %u\n", type);
         loop_rc = 1;
         break;
     }
@@ -6649,7 +6651,7 @@ static ds4_dist_worker_forwarder *dist_worker_get_forwarder(
     upstream->forwarders = forwarder;
     pthread_mutex_unlock(&upstream->forward_mu);
 
-    fprintf(stderr,
+    ds4_log(stderr, DS4_LOG_DEFAULT,
             "ds4: distributed worker: opened pipelined worker-to-worker connection to %s:%u (window %u)\n",
             host,
             port,
@@ -7726,7 +7728,7 @@ static int dist_worker_read_loop_prefetch(ds4_dist_worker_state *state, int fd) 
     }
 
     int loop_rc = 0;
-    fprintf(stderr,
+    ds4_log(stderr, DS4_LOG_DEFAULT,
             "ds4: distributed worker: receive prefetch depth %u enabled\n",
             queue.depth);
 
@@ -7736,7 +7738,7 @@ static int dist_worker_read_loop_prefetch(ds4_dist_worker_state *state, int fd) 
         int rc = dist_read_frame_header(fd, &type, &bytes, err, sizeof(err));
         if (rc == 0) break;
         if (rc < 0) {
-            fprintf(stderr, "ds4: distributed worker: protocol error: %s\n", err);
+            ds4_log(stderr, DS4_LOG_ERROR, "ds4: distributed worker: protocol error: %s\n", err);
             loop_rc = 1;
             break;
         }
@@ -7750,7 +7752,7 @@ static int dist_worker_read_loop_prefetch(ds4_dist_worker_state *state, int fd) 
             }
             msg[n] = '\0';
             if (bytes > n) dist_discard_bytes(fd, bytes - n);
-            fprintf(stderr, "ds4: distributed worker: coordinator error: %s\n", msg);
+            ds4_log(stderr, DS4_LOG_ERROR, "ds4: distributed worker: coordinator error: %s\n", msg);
             loop_rc = 1;
             break;
         }
@@ -7808,7 +7810,7 @@ static int dist_worker_read_loop_prefetch(ds4_dist_worker_state *state, int fd) 
         pthread_mutex_lock(&upstream.write_mu);
         dist_send_error(fd, "unsupported distributed worker frame");
         pthread_mutex_unlock(&upstream.write_mu);
-        fprintf(stderr, "ds4: distributed worker: rejected unsupported frame type %u\n", type);
+        ds4_log(stderr, DS4_LOG_WARNING, "ds4: distributed worker: rejected unsupported frame type %u\n", type);
         loop_rc = 1;
         break;
     }
@@ -7836,7 +7838,7 @@ static void *dist_worker_data_client_main(void *arg) {
         ? dist_worker_read_loop(state, fd)
         : dist_worker_read_loop_prefetch(state, fd);
     if (rc != 0) {
-        fprintf(stderr,
+        ds4_log(stderr, DS4_LOG_ERROR,
                 "ds4: distributed worker: data connection %s:%s closed after error\n",
                 peer_host,
                 peer_port);
@@ -7855,14 +7857,14 @@ static void *dist_worker_data_listener_main(void *arg) {
         int fd = accept(listen_fd, (struct sockaddr *)&ss, &slen);
         if (fd < 0) {
             if (errno == EINTR) continue;
-            fprintf(stderr, "ds4: distributed worker: data accept failed: %s\n", strerror(errno));
+            ds4_log(stderr, DS4_LOG_ERROR, "ds4: distributed worker: data accept failed: %s\n", strerror(errno));
             continue;
         }
         dist_set_socket_low_latency(fd);
 
         ds4_dist_data_client_ctx *ctx = calloc(1, sizeof(*ctx));
         if (!ctx) {
-            fprintf(stderr, "ds4: distributed worker: out of memory accepting data connection\n");
+            ds4_log(stderr, DS4_LOG_ERROR, "ds4: distributed worker: out of memory accepting data connection\n");
             close(fd);
             continue;
         }
@@ -7878,7 +7880,7 @@ static void *dist_worker_data_listener_main(void *arg) {
 
         pthread_t tid;
         if (pthread_create(&tid, NULL, dist_worker_data_client_main, ctx) != 0) {
-            fprintf(stderr, "ds4: distributed worker: pthread_create failed for data connection\n");
+            ds4_log(stderr, DS4_LOG_ERROR, "ds4: distributed worker: pthread_create failed for data connection\n");
             close(fd);
             free(ctx);
             continue;
@@ -7902,12 +7904,12 @@ static int dist_run_worker(ds4_engine *engine, const ds4_dist_options *opt, int 
     int requested_port = opt->listen_port > 0 ? opt->listen_port : 0;
     int listen_fd = dist_open_listener(listen_host, requested_port, err, sizeof(err));
     if (listen_fd < 0) {
-        fprintf(stderr, "ds4: distributed worker: %s\n", err);
+        ds4_log(stderr, DS4_LOG_ERROR, "ds4: distributed worker: %s\n", err);
         return 1;
     }
     int listen_port_i = dist_listener_port(listen_fd);
     if (listen_port_i <= 0) {
-        fprintf(stderr, "ds4: distributed worker: could not determine data listener port\n");
+        ds4_log(stderr, DS4_LOG_ERROR, "ds4: distributed worker: could not determine data listener port\n");
         close(listen_fd);
         return 1;
     }
@@ -7926,13 +7928,13 @@ static int dist_run_worker(ds4_engine *engine, const ds4_dist_options *opt, int 
 
     pthread_t data_tid;
     if (pthread_create(&data_tid, NULL, dist_worker_data_listener_main, &state) != 0) {
-        fprintf(stderr, "ds4: distributed worker: pthread_create failed for data listener\n");
+        ds4_log(stderr, DS4_LOG_ERROR, "ds4: distributed worker: pthread_create failed for data listener\n");
         close(listen_fd);
         return 1;
     }
     pthread_detach(data_tid);
 
-    fprintf(stderr,
+    ds4_log(stderr, DS4_LOG_DEFAULT,
             "ds4: distributed worker: layers %u:%s model_id=%d data_listen=%s:%u connecting to coordinator %s:%d\n",
             opt->layers.start,
             layer_end,
@@ -7945,17 +7947,17 @@ static int dist_run_worker(ds4_engine *engine, const ds4_dist_options *opt, int 
     for (;;) {
         int fd = dist_connect_endpoint(opt->coordinator_host, opt->coordinator_port, err, sizeof(err));
         if (fd < 0) {
-            fprintf(stderr, "ds4: distributed worker: %s; retrying\n", err);
+            ds4_log(stderr, DS4_LOG_WARNING, "ds4: distributed worker: %s; retrying\n", err);
             dist_sleep_reconnect();
             continue;
         }
 
         char peer_host[NI_MAXHOST], peer_port[NI_MAXSERV];
         dist_peer_name(fd, peer_host, sizeof(peer_host), peer_port, sizeof(peer_port));
-        fprintf(stderr, "ds4: distributed worker: connected to coordinator %s:%s\n", peer_host, peer_port);
+        ds4_log(stderr, DS4_LOG_DEFAULT, "ds4: distributed worker: connected to coordinator %s:%s\n", peer_host, peer_port);
 
         if (dist_send_hello(engine, opt, ctx_size, listen_port, fd) != 0) {
-            fprintf(stderr, "ds4: distributed worker: failed to send HELLO: %s\n", strerror(errno));
+            ds4_log(stderr, DS4_LOG_ERROR, "ds4: distributed worker: failed to send HELLO: %s\n", strerror(errno));
             close(fd);
             dist_sleep_reconnect();
             continue;
@@ -7967,11 +7969,11 @@ static int dist_run_worker(ds4_engine *engine, const ds4_dist_options *opt, int 
         close(fd);
         uint32_t dropped_sessions = dist_worker_clear_sessions(&state);
         if (dropped_sessions) {
-            fprintf(stderr,
+            ds4_log(stderr, DS4_LOG_WARNING,
                     "ds4: distributed worker: cleared %u sessions after coordinator disconnect\n",
                     dropped_sessions);
         }
-        fprintf(stderr, "ds4: distributed worker: coordinator disconnected%s; reconnecting\n",
+        ds4_log(stderr, DS4_LOG_WARNING, "ds4: distributed worker: coordinator disconnected%s; reconnecting\n",
                 rc ? " after error" : "");
         dist_sleep_reconnect();
     }
@@ -8370,13 +8372,13 @@ static int dist_validate_layers_for_model(const ds4_dist_options *opt, uint32_t 
 
 int ds4_dist_run(ds4_engine *engine, const ds4_dist_options *opt, const ds4_dist_generation_options *gen) {
     if (!engine || !opt) {
-        fprintf(stderr, "ds4: distributed runtime requires an open engine and options\n");
+        ds4_log(stderr, DS4_LOG_ERROR, "ds4: distributed runtime requires an open engine and options\n");
         return 1;
     }
     char err[256];
     if (dist_validate_options(opt, err, sizeof(err)) != 0 ||
         dist_validate_layers_for_model(opt, (uint32_t)ds4_engine_layer_count(engine), err, sizeof(err)) != 0) {
-        fprintf(stderr, "ds4: %s\n", err);
+        ds4_log(stderr, DS4_LOG_ERROR, "ds4: %s\n", err);
         return 2;
     }
 
@@ -8389,6 +8391,6 @@ int ds4_dist_run(ds4_engine *engine, const ds4_dist_options *opt, const ds4_dist
         return dist_run_worker(engine, opt, gen ? gen->ctx_size : 0);
     }
 
-    fprintf(stderr, "ds4: distributed runtime requested without a distributed role\n");
+    ds4_log(stderr, DS4_LOG_ERROR, "ds4: distributed runtime requested without a distributed role\n");
     return 1;
 }

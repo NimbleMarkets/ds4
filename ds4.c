@@ -1833,10 +1833,11 @@ static bool accelerator_prepare_model_tensor_spans(const ds4_model *m,
     uint64_t prepared = 0;
     uint64_t merged = 0;
 
-    fprintf(stderr, "%sds4: CUDA preparing model tensor mappings%s",
-            tty ? "\r\033[K" : "",
-            tty ? ": 0.00 GiB" : "\n");
-    fflush(stderr);
+    if (tty) {
+        ds4_log(stderr, DS4_LOG_ERROR, "\r\033[Kds4: CUDA preparing model tensor mappings: 0.00 GiB");
+    } else {
+        ds4_log(stderr, DS4_LOG_ERROR, "ds4: CUDA preparing model tensor mappings\n");
+    }
 
     for (uint64_t i = 0; i < nspan;) {
         uint64_t off = spans[i].off;
@@ -1870,13 +1871,12 @@ static bool accelerator_prepare_model_tensor_spans(const ds4_model *m,
                 ds4_log(stderr, DS4_LOG_ERROR, "ds4: CUDA prepared model tensor mappings %.2f GiB\n",
                         (double)prepared / 1073741824.0);
             }
-            fflush(stderr);
             last_progress = now;
             while (next_progress <= prepared) next_progress += progress_step;
         }
     }
 
-    if (tty) fputc('\n', stderr);
+    if (tty) ds4_log(stderr, DS4_LOG_DEFAULT, "\n");
     free(spans);
     if (prepared_out) *prepared_out = prepared;
     return true;
@@ -1898,7 +1898,7 @@ static bool accelerator_cache_q8_tensors(const ds4_model *m,
         snprintf(label, sizeof(label), "tensor:%.*s", (int)t->name.len, t->name.ptr);
         if (t->type == DS4_TENSOR_Q8_0 && t->ndim == 2 &&
             ds4_gpu_cache_q8_f16_range(m->map, m->size, t->abs_offset, t->bytes, t->dim[0], t->dim[1], label) == 0) {
-            fprintf(stderr, "ds4: accelerator failed to cache dequantized Q8 tensor %.*s\n",
+            ds4_log(stderr, DS4_LOG_ERROR, "ds4: accelerator failed to cache dequantized Q8 tensor %.*s\n",
                     (int)t->name.len, t->name.ptr);
             return false;
         }
@@ -10218,7 +10218,7 @@ static void metal_graph_debug_dump_f16_tensor(
     if (!t || n_f16 == 0 || !metal_graph_debug_wants(name, il, pos)) return;
 
     if (ds4_gpu_synchronize() == 0) {
-        fprintf(stderr, "ds4: failed to synchronize before dumping %s layer %u pos %u\n", name, il, pos);
+        ds4_log_engine( DS4_LOG_ERROR, "ds4: failed to synchronize before dumping %s layer %u pos %u\n", name, il, pos);
         return;
     }
 
@@ -10229,14 +10229,14 @@ static void metal_graph_debug_dump_f16_tensor(
         char path[1024];
         snprintf(path, sizeof(path), "%s_%s-%u_pos%u.bin", prefix, name, il, pos);
         if (write_f32_binary_file(path, fbuf, n_f16)) {
-            fprintf(stderr, "ds4: dumped %s layer %u pos %u to %s\n", name, il, pos, path);
+            ds4_log_engine( DS4_LOG_DEFAULT, "ds4: dumped %s layer %u pos %u to %s\n", name, il, pos, path);
         }
     }
     free(fbuf);
     free(hbuf);
 
     if (ds4_gpu_begin_commands() == 0) {
-        fprintf(stderr, "ds4: failed to resume Metal command batch after dumping %s layer %u pos %u\n", name, il, pos);
+        ds4_log_engine( DS4_LOG_ERROR, "ds4: failed to resume Metal command batch after dumping %s layer %u pos %u\n", name, il, pos);
     }
 }
 
@@ -13669,7 +13669,7 @@ static bool metal_graph_encode_layer_attention_batch(
                 ok = false;
             }
             if (ok && DS4_GPU_ATTN_COMP_CACHE_F16 && n_comp > g->attn_comp_stage_cap) {
-                fprintf(stderr, "ds4: Metal graph compressed KV staging capacity exceeded at layer %u\n", il);
+                ds4_log_engine( DS4_LOG_ERROR, "ds4: Metal graph compressed KV staging capacity exceeded at layer %u\n", il);
                 ok = false;
             }
             ds4_gpu_tensor *attn_comp_target = NULL;
@@ -13752,7 +13752,7 @@ static bool metal_graph_encode_layer_attention_batch(
                     ok = false;
                 }
                 if (ok && DS4_GPU_ATTN_COMP_CACHE_F16 && comp_chunk > g->attn_comp_stage_cap) {
-                    fprintf(stderr, "ds4: Metal graph compressed KV staging capacity exceeded at layer %u\n", il);
+                    ds4_log_engine( DS4_LOG_ERROR, "ds4: Metal graph compressed KV staging capacity exceeded at layer %u\n", il);
                     ok = false;
                 }
                 ds4_gpu_tensor *attn_comp_target =
@@ -20447,7 +20447,7 @@ int ds4_session_create(ds4_session **out, ds4_engine *e, int ctx_size) {
     if (!out || !e || ctx_size <= 0) return 1;
     if (e->backend == DS4_BACKEND_CPU) {
         if (e->distributed.role == DS4_DISTRIBUTED_COORDINATOR) {
-            fprintf(stderr, "ds4: distributed coordinator sessions require the graph backend\n");
+            ds4_log_engine( DS4_LOG_ERROR, "ds4: distributed coordinator sessions require the graph backend\n");
             return 1;
         }
         ds4_session *s = xcalloc(1, sizeof(*s));
@@ -20506,7 +20506,7 @@ int ds4_session_create(ds4_session **out, ds4_engine *e, int ctx_size) {
                                     ctx_size,
                                     err,
                                     sizeof(err)) != 0) {
-            fprintf(stderr,
+            ds4_log_engine( DS4_LOG_ERROR,
                     "ds4: failed to create distributed coordinator session: %s\n",
                     err[0] ? err : "unknown error");
             metal_graph_free(&s->graph);
@@ -20651,7 +20651,7 @@ int ds4_session_eval_output_head_from_hc(ds4_session *s,
                                      (uint64_t)DS4_N_VOCAB * sizeof(float)) != 0;
     if (!ok) {
         if (ds4_gpu_synchronize() == 0) {
-            fprintf(stderr, "ds4: synchronize after output-head hidden-state failure also failed\n");
+            ds4_log_engine( DS4_LOG_ERROR, "ds4: synchronize after output-head hidden-state failure also failed\n");
         }
         if (errlen) snprintf(err, errlen, "%s output-head hidden-state evaluation failed",
                              ds4_backend_name(e->backend));
@@ -20822,7 +20822,7 @@ int ds4_session_eval_layer_slice(ds4_session *s,
         }
         if (!ok) {
             if (ds4_gpu_synchronize() == 0) {
-                fprintf(stderr, "ds4: synchronize after layer-slice full failure also failed\n");
+                ds4_log_engine( DS4_LOG_ERROR, "ds4: synchronize after layer-slice full failure also failed\n");
             }
             if (errlen) snprintf(err, errlen, "%s layer-slice full evaluation failed",
                                  ds4_backend_name(e->backend));
@@ -20898,7 +20898,7 @@ int ds4_session_eval_layer_slice(ds4_session *s,
         }
         if (!ok) {
             if (ds4_gpu_synchronize() == 0) {
-                fprintf(stderr, "ds4: synchronize after layer-slice decode failure also failed\n");
+                ds4_log_engine( DS4_LOG_ERROR, "ds4: synchronize after layer-slice decode failure also failed\n");
             }
             if (errlen) snprintf(err, errlen, "%s layer-slice decode failed",
                                  ds4_backend_name(e->backend));
@@ -20963,7 +20963,7 @@ int ds4_session_eval_layer_slice(ds4_session *s,
     }
     if (!ok) {
         if (ds4_gpu_synchronize() == 0) {
-            fprintf(stderr, "ds4: synchronize after layer-slice failure also failed\n");
+            ds4_log_engine( DS4_LOG_ERROR, "ds4: synchronize after layer-slice failure also failed\n");
         }
         if (errlen) snprintf(err, errlen, "%s layer-slice failed",
                              ds4_backend_name(e->backend));

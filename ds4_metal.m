@@ -812,7 +812,7 @@ static int ds4_gpu_add_model_view_range(
     if (map_size > UINT64_MAX - leading ||
         leading + map_size > UINT64_MAX - (page - 1))
     {
-        fprintf(stderr, "ds4: Metal model mapped range overflows page alignment\n");
+        ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal model mapped range overflows page alignment\n");
         return 0;
     }
     const uint64_t mapped_model_size = round_up_u64(leading + map_size, page);
@@ -836,16 +836,16 @@ static int ds4_gpu_add_model_view_range(
      * offset. We never split a weight tensor across command encoders.
      */
     if (max_tensor_bytes > map_size) {
-        fprintf(stderr, "ds4: Metal model max tensor span is larger than a mapped tensor span\n");
+        ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal model max tensor span is larger than a mapped tensor span\n");
         return 0;
     }
     if (max_tensor_bytes > UINT64_MAX - (page - 1)) {
-        fprintf(stderr, "ds4: Metal model max tensor span overflows page alignment\n");
+        ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal model max tensor span overflows page alignment\n");
         return 0;
     }
     const uint64_t max_tensor_rounded = round_up_u64(max_tensor_bytes, page);
     if (max_tensor_rounded > UINT64_MAX - page) {
-        fprintf(stderr, "ds4: Metal model view overlap overflows page slack\n");
+        ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal model view overlap overflows page slack\n");
         return 0;
     }
     const uint64_t overlap = max_tensor_rounded + page;
@@ -5788,7 +5788,7 @@ int ds4_gpu_set_model_map_spans(
         uint64_t first_offset = UINT64_MAX;
         for (uint32_t i = 0; i < count; i++) {
             if (offsets[i] > model_size || sizes[i] == 0 || sizes[i] > model_size - offsets[i]) {
-                fprintf(stderr, "ds4: Metal model span %u is outside the GGUF mapping\n", i);
+                ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal model span %u is outside the GGUF mapping\n", i);
                 ds4_gpu_model_residency_clear();
                 ds4_gpu_model_views_clear();
                 return 0;
@@ -5817,7 +5817,7 @@ int ds4_gpu_set_model_map_spans(
         g_model_mapped_offset = first_offset == UINT64_MAX ? 0 : first_offset;
         g_model_mapped_size = mapped_total;
         g_model_mapped_max_tensor_bytes = max_tensor_bytes;
-        fprintf(stderr,
+        ds4_gpu_log(DS4_GPU_LOG_DEFAULT,
                 "ds4: Metal mapped mmaped model as %u disjoint shared buffers across %u tensor spans\n",
                 g_model_view_count,
                 count);
@@ -7075,7 +7075,7 @@ int ds4_gpu_argmax_tensor(
     if (!out_idx || !logits || n_vocab == 0) return 0;
     if (ds4_gpu_tensor_bytes(out_idx) < sizeof(int32_t) ||
         ds4_gpu_tensor_bytes(logits) < (uint64_t)n_vocab * sizeof(float)) {
-        fprintf(stderr, "ds4: Metal graph argmax received undersized buffers\n");
+        ds4_gpu_log(DS4_GPU_LOG_ERROR, "ds4: Metal graph argmax received undersized buffers\n");
         return 0;
     }
 
