@@ -2833,22 +2833,23 @@ static bool tensor_type_is_f16_or_q8_0(uint32_t type) {
     return type == DS4_TENSOR_F16 || type == DS4_TENSOR_Q8_0;
 }
 
-static void tensor_expect_f16_or_q8_0_layout(
+static bool tensor_expect_f16_or_q8_0_layout(
         const ds4_tensor *t,
         uint32_t          ndim,
         uint64_t          d0,
         uint64_t          d1,
-        uint64_t          d2) {
-    if (!t) ds4_die("internal error: missing tensor while validating layout");
+        uint64_t          d2,
+        char             *err,
+        size_t            errlen) {
+    if (!t) return ds4_fail(err, errlen, "internal error: missing tensor while validating layout");
     if (!tensor_type_is_f16_or_q8_0(t->type)) {
-        fprintf(stderr,
+        return ds4_fail(err, errlen,
                 "ds4: tensor %.*s has type %s, expected f16 or q8_0\n",
                 (int)t->name.len,
                 t->name.ptr,
                 tensor_type_name(t->type));
-        exit(1);
     }
-    tensor_expect_layout(t, t->type, ndim, d0, d1, d2);
+    return tensor_expect_layout(t, t->type, ndim, d0, d1, d2, err, errlen);
 }
 
 static bool tensor_is_routed_expert_type(uint32_t type) {
@@ -2877,8 +2878,10 @@ static bool tensor_expect_routed_expert(
         uint32_t          ndim,
         uint64_t          d0,
         uint64_t          d1,
-        uint64_t          d2) {
-    if (!t) ds4_die("internal error: missing routed expert tensor while validating layout");
+        uint64_t          d2,
+        char             *err,
+        size_t            errlen) {
+    if (!t) ds4_fail(err, errlen, "internal error: missing routed expert tensor while validating layout");
     if (!tensor_is_routed_expert_type(t->type)) {
         return ds4_fail(err, errlen,
                 "ds4: tensor %.*s has type %u (%s), expected a routed expert quant type\n",
@@ -3000,7 +3003,7 @@ static const ds4_layer_weights *weights_first_bound_layer(const ds4_weights *w) 
 /* Verify every tensor type and dimension used by the specialized pipeline.
  * For distributed sliced GGUFs, only the advertised local layer range is
  * required; token embedding and output head are validated when present. */
-static void weights_validate_layout(
+static bool weights_validate_layout(
         const ds4_weights *w,
         uint32_t           layer_start,
         uint32_t           layer_end,
@@ -3012,11 +3015,11 @@ static void weights_validate_layout(
     const uint64_t q_dim = (uint64_t)DS4_N_HEAD * DS4_N_HEAD_DIM;
     const uint64_t out_low_dim = (uint64_t)DS4_N_OUT_GROUP * DS4_N_LORA_O;
 
-    if (!w) ds4_die("internal error: missing weights while validating layout");
-    if (layer_start >= DS4_N_LAYER) ds4_die("invalid first layer in weight layout validation");
+    if (!w) return ds4_fail(err, errlen,"internal error: missing weights while validating layout");
+    if (layer_start >= DS4_N_LAYER) return ds4_fail(err, errlen, "invalid first layer in weight layout validation");
     if (layer_end == UINT32_MAX) layer_end = DS4_N_LAYER - 1u;
     if (layer_end >= DS4_N_LAYER || layer_end < layer_start) {
-        ds4_die("invalid layer range in weight layout validation");
+        return ds4_fail(err, errlen, "invalid layer range in weight layout validation");
     }
     
     if (!tensor_expect_layout(w->token_embd,      DS4_TENSOR_F16,  2, DS4_N_EMBD, DS4_N_VOCAB, 0, err, errlen) ||
@@ -3028,20 +3031,22 @@ static void weights_validate_layout(
         return false;
     }
 
-    if (require_token_embd && !w->token_embd) ds4_die("required token embedding tensor is missing");
+    if (require_token_embd && !w->token_embd) return ds4_fail(err, errlen, "required token embedding tensor is missing");
     if (w->token_embd) {
-        tensor_expect_layout(w->token_embd, DS4_TENSOR_F16, 2, DS4_N_EMBD, DS4_N_VOCAB, 0);
+        if (!tensor_expect_layout(w->token_embd, DS4_TENSOR_F16, 2, DS4_N_EMBD, DS4_N_VOCAB, 0, err, errlen))
+        return false;
     }
 
     const bool have_output = weights_have_output_head(w);
     if (require_output && !have_output) ds4_die("required output head tensors are missing");
     if (weights_have_partial_output_head(w) && !have_output) ds4_die("partial output head in GGUF");
-    if (have_output) {
-        tensor_expect_layout(w->output_hc_base,  DS4_TENSOR_F32,  1, DS4_N_HC, 0, 0);
-        tensor_expect_layout(w->output_hc_fn,    DS4_TENSOR_F16,  2, hc_dim, DS4_N_HC, 0);
-        tensor_expect_layout(w->output_hc_scale, DS4_TENSOR_F32,  1, 1, 0, 0);
-        tensor_expect_layout(w->output_norm,     DS4_TENSOR_F32,  1, DS4_N_EMBD, 0, 0);
-        tensor_expect_layout(w->output,          DS4_TENSOR_Q8_0, 2, DS4_N_EMBD, DS4_N_VOCAB, 0);
+    if (have_output && (
+        !tensor_expect_layout(w->output_hc_base,  DS4_TENSOR_F32,  1, DS4_N_HC, 0, 0, err, errlen) ||
+        !tensor_expect_layout(w->output_hc_fn,    DS4_TENSOR_F16,  2, hc_dim, DS4_N_HC, 0, err, errlen) ||
+        !tensor_expect_layout(w->output_hc_scale, DS4_TENSOR_F32,  1, 1, 0, 0, err, errlen) ||
+        !tensor_expect_layout(w->output_norm,     DS4_TENSOR_F32,  1, DS4_N_EMBD, 0, 0, err, errlen) ||
+        !tensor_expect_layout(w->output,          DS4_TENSOR_Q8_0, 2, DS4_N_EMBD, DS4_N_VOCAB, 0, err, errlen))) {
+        return false;
     }
 
     for (uint32_t il = layer_start; il <= layer_end; il++) {
@@ -3080,7 +3085,7 @@ static void weights_validate_layout(
         if (ratio == 4) {
             const uint64_t index_q_dim = (uint64_t)DS4_N_INDEXER_HEAD * DS4_N_INDEXER_HEAD_DIM;
             const uint64_t index_width = 2u * DS4_N_INDEXER_HEAD_DIM;
-            if (!tensor_expect_f16_or_q8_0_layout(l->indexer_attn_q_b, 2, DSN_LORA_Q, index_q_dim, 0, err, errlen) ||
+            if (!tensor_expect_f16_or_q8_0_layout(l->indexer_attn_q_b, 2, DS4_N_LORA_Q, index_q_dim, 0, err, errlen) ||
                 !tensor_expect_layout(l->indexer_proj,            DS4_TENSOR_F16, 2, DS4_N_EMBD, DS4_N_INDEXER_HEAD, 0, err, errlen) ||
                 !tensor_expect_layout(l->indexer_compressor_ape,  DS4_TENSOR_F16, 2, index_width, ratio, 0, err, errlen) ||
                 !tensor_expect_layout(l->indexer_compressor_kv,   DS4_TENSOR_F16, 2, DS4_N_EMBD, index_width, 0, err, errlen) ||
@@ -3088,7 +3093,8 @@ static void weights_validate_layout(
                 !tensor_expect_layout(l->indexer_compressor_norm, DS4_TENSOR_F32, 1, DS4_N_INDEXER_HEAD_DIM, 0, 0, err, errlen)) {
                 return false;
             }
-            tensor_expect_f16_or_q8_0_layout(l->indexer_attn_q_b, 2, DS4_N_LORA_Q, index_q_dim, 0);
+            if (!tensor_expect_f16_or_q8_0_layout(l->indexer_attn_q_b, 2, DS4_N_LORA_Q, index_q_dim, 0, err, errlen))
+                return false;
         }
 
         if (!tensor_expect_layout(l->hc_ffn_fn,      DS4_TENSOR_F16,  2, hc_dim, hc_mix_dim, 0, err, errlen) ||
@@ -3511,16 +3517,16 @@ static bool config_validate_model(const ds4_model *m, char *err, size_t errlen) 
     return true;
 }
 
-static void weights_bind_output(ds4_weights *w, const ds4_model *m, bool required, bool optional) {
-    if (required) {
-        w->output_hc_base   = required_tensor(m, "output_hc_base.weight");
-        w->output_hc_fn     = required_tensor(m, "output_hc_fn.weight");
-        w->output_hc_scale  = required_tensor(m, "output_hc_scale.weight");
-        w->output_norm      = required_tensor(m, "output_norm.weight");
-        w->output           = required_tensor(m, "output.weight");
-        return;
+static bool weights_bind_output(ds4_weights *w, const ds4_model *m, bool required, bool optional, char *err, size_t errlen) {
+    if (required && (
+        !required_tensor(m, "output_hc_base.weight", &w->output_hc_base, err, errlen) ||
+        !required_tensor(m, "output_hc_fn.weight", &w->output_hc_fn, err, errlen) ||
+        !required_tensor(m, "output_hc_scale.weight", &w->output_hc_scale, err, errlen) ||
+        !required_tensor(m, "output_norm.weight", &w->output_norm, err, errlen) ||
+        !required_tensor(m, "output.weight", &w->output, err, errlen))) {
+        return false;
     }
-    if (!optional) return;
+    if (!optional) return true;
 
     w->output_hc_base   = model_find_tensor(m, "output_hc_base.weight");
     w->output_hc_fn     = model_find_tensor(m, "output_hc_fn.weight");
@@ -3528,60 +3534,68 @@ static void weights_bind_output(ds4_weights *w, const ds4_model *m, bool require
     w->output_norm      = model_find_tensor(m, "output_norm.weight");
     w->output           = model_find_tensor(m, "output.weight");
     if (weights_have_partial_output_head(w) && !weights_have_output_head(w)) {
-        ds4_die("partial output head in GGUF");
+        return ds4_fail(err, errlen, "partial output head in GGUF");
     }
+    return true;
 }
 
-static void weights_bind_layer(ds4_layer_weights *l, const ds4_model *m, uint32_t il) {
+static bool weights_bind_layer(ds4_layer_weights *l, const ds4_model *m, uint32_t il, char *err, size_t errlen) {
     const uint32_t compress_ratio = ds4_layer_compress_ratio(il);
 
-    l->hc_attn_fn      = required_tensorf(m, "blk.%u.hc_attn_fn.weight", il);
-    l->hc_attn_scale   = required_tensorf(m, "blk.%u.hc_attn_scale.weight", il);
-    l->hc_attn_base    = required_tensorf(m, "blk.%u.hc_attn_base.weight", il);
-    l->attn_norm       = required_tensorf(m, "blk.%u.attn_norm.weight", il);
-    l->attn_q_a        = required_tensorf(m, "blk.%u.attn_q_a.weight", il);
-    l->attn_q_a_norm   = required_tensorf(m, "blk.%u.attn_q_a_norm.weight", il);
-    l->attn_q_b        = required_tensorf(m, "blk.%u.attn_q_b.weight", il);
-    l->attn_kv         = required_tensorf(m, "blk.%u.attn_kv.weight", il);
-    l->attn_kv_a_norm  = required_tensorf(m, "blk.%u.attn_kv_a_norm.weight", il);
-    l->attn_sinks      = required_tensorf(m, "blk.%u.attn_sinks.weight", il);
-    l->attn_output_a   = required_tensorf(m, "blk.%u.attn_output_a.weight", il);
-    l->attn_output_b   = required_tensorf(m, "blk.%u.attn_output_b.weight", il);
-    if (compress_ratio != 0) {
-        l->attn_compressor_ape  = required_tensorf(m, "blk.%u.attn_compressor_ape.weight", il);
-        l->attn_compressor_kv   = required_tensorf(m, "blk.%u.attn_compressor_kv.weight", il);
-        l->attn_compressor_gate = required_tensorf(m, "blk.%u.attn_compressor_gate.weight", il);
-        l->attn_compressor_norm = required_tensorf(m, "blk.%u.attn_compressor_norm.weight", il);
+    if (!required_tensorf(m, "blk.%u.hc_attn_fn.weight", il, &l->hc_attn_fn, err, errlen) ||
+        !required_tensorf(m, "blk.%u.hc_attn_scale.weight", il, &l->hc_attn_scale, err, errlen) ||
+        !required_tensorf(m, "blk.%u.hc_attn_base.weight", il, &l->hc_attn_base, err, errlen) ||
+        !required_tensorf(m, "blk.%u.attn_norm.weight", il, &l->attn_norm, err, errlen) ||
+        !required_tensorf(m, "blk.%u.attn_q_a.weight", il, &l->attn_q_a, err, errlen) ||
+        !required_tensorf(m, "blk.%u.attn_q_a_norm.weight", il, &l->attn_q_a_norm, err, errlen) ||
+        !required_tensorf(m, "blk.%u.attn_q_b.weight", il, &l->attn_q_b, err, errlen) ||
+        !required_tensorf(m, "blk.%u.attn_kv.weight", il, &l->attn_kv, err, errlen) ||
+        !required_tensorf(m, "blk.%u.attn_kv_a_norm.weight", il, &l->attn_kv_a_norm, err, errlen) ||
+        !required_tensorf(m, "blk.%u.attn_sinks.weight", il, &l->attn_sinks, err, errlen) ||
+        !required_tensorf(m, "blk.%u.attn_output_a.weight", il, &l->attn_output_a, err, errlen) ||
+        !required_tensorf(m, "blk.%u.attn_output_b.weight", il, &l->attn_output_b, err, errlen)) {
+        return false;
     }
-    if (compress_ratio == 4) {
-        l->indexer_attn_q_b = required_tensorf(m, "blk.%u.indexer.attn_q_b.weight", il);
-        l->indexer_proj     = required_tensorf(m, "blk.%u.indexer.proj.weight", il);
-        l->indexer_compressor_ape  = required_tensorf(m, "blk.%u.indexer_compressor_ape.weight", il);
-        l->indexer_compressor_kv   = required_tensorf(m, "blk.%u.indexer_compressor_kv.weight", il);
-        l->indexer_compressor_gate = required_tensorf(m, "blk.%u.indexer_compressor_gate.weight", il);
-        l->indexer_compressor_norm = required_tensorf(m, "blk.%u.indexer_compressor_norm.weight", il);
+    if (compress_ratio != 0 && (
+        !required_tensorf(m, "blk.%u.attn_compressor_ape.weight", il, &l->attn_compressor_ape, err, errlen) ||
+        !required_tensorf(m, "blk.%u.attn_compressor_kv.weight", il, &l->attn_compressor_kv, err, errlen) ||
+        !required_tensorf(m, "blk.%u.attn_compressor_gate.weight", il, &l->attn_compressor_gate, err, errlen) ||
+        !required_tensorf(m, "blk.%u.attn_compressor_norm.weight", il, &l->attn_compressor_norm, err, errlen))) {
+        return false;
     }
-    l->hc_ffn_fn       = required_tensorf(m, "blk.%u.hc_ffn_fn.weight", il);
-    l->hc_ffn_scale    = required_tensorf(m, "blk.%u.hc_ffn_scale.weight", il);
-    l->hc_ffn_base     = required_tensorf(m, "blk.%u.hc_ffn_base.weight", il);
-    l->ffn_norm        = required_tensorf(m, "blk.%u.ffn_norm.weight", il);
-    l->ffn_gate_inp    = required_tensorf(m, "blk.%u.ffn_gate_inp.weight", il);
-    l->ffn_exp_probs_b = tensor_by_namef(m, "blk.%u.exp_probs_b.bias", il);
-    l->ffn_gate_exps   = required_tensorf(m, "blk.%u.ffn_gate_exps.weight", il);
-    l->ffn_up_exps     = required_tensorf(m, "blk.%u.ffn_up_exps.weight", il);
-    l->ffn_down_exps   = required_tensorf(m, "blk.%u.ffn_down_exps.weight", il);
-    l->ffn_gate_shexp  = required_tensorf(m, "blk.%u.ffn_gate_shexp.weight", il);
-    l->ffn_up_shexp    = required_tensorf(m, "blk.%u.ffn_up_shexp.weight", il);
-    l->ffn_down_shexp  = required_tensorf(m, "blk.%u.ffn_down_shexp.weight", il);
-
-    if (il < DS4_N_HASH_LAYER) {
-        l->ffn_gate_tid2eid = required_tensorf(m, "blk.%u.ffn_gate_tid2eid.weight", il);
+    if (compress_ratio == 4 && (
+        !required_tensorf(m, "blk.%u.indexer.attn_q_b.weight", il, &l->indexer_attn_q_b, err, errlen) ||
+        !required_tensorf(m, "blk.%u.indexer.proj.weight", il, &l->indexer_proj, err, errlen) ||
+        !required_tensorf(m, "blk.%u.indexer_compressor_ape.weight", il, &l->indexer_compressor_ape, err, errlen) ||
+        !required_tensorf(m, "blk.%u.indexer_compressor_kv.weight", il, &l->indexer_compressor_kv, err, errlen) ||
+        !required_tensorf(m, "blk.%u.indexer_compressor_gate.weight", il, &l->indexer_compressor_gate, err, errlen) ||
+        !required_tensorf(m, "blk.%u.indexer_compressor_norm.weight", il, &l->indexer_compressor_norm, err, errlen))) {
+        return false;
     }
+    if (!required_tensorf(m, "blk.%u.hc_ffn_fn.weight", il, &l->hc_ffn_fn, err, errlen) ||
+        !required_tensorf(m, "blk.%u.hc_ffn_scale.weight", il, &l->hc_ffn_scale, err, errlen) ||
+        !required_tensorf(m, "blk.%u.hc_ffn_base.weight", il, &l->hc_ffn_base, err, errlen) ||
+        !required_tensorf(m, "blk.%u.ffn_norm.weight", il, &l->ffn_norm, err, errlen) ||
+        !required_tensorf(m, "blk.%u.ffn_gate_inp.weight", il, &l->ffn_gate_inp, err, errlen) ||
+        !tensor_by_namef(m, "blk.%u.exp_probs_b.bias", il, &l->ffn_exp_probs_b, err, errlen) ||
+        !required_tensorf(m, "blk.%u.ffn_gate_exps.weight", il, &l->ffn_gate_exps, err, errlen) ||
+        !required_tensorf(m, "blk.%u.ffn_up_exps.weight", il, &l->ffn_up_exps, err, errlen) ||
+        !required_tensorf(m, "blk.%u.ffn_down_exps.weight", il, &l->ffn_down_exps, err, errlen) ||
+        !required_tensorf(m, "blk.%u.ffn_gate_shexp.weight", il, &l->ffn_gate_shexp, err, errlen) ||
+        !required_tensorf(m, "blk.%u.ffn_up_shexp.weight", il, &l->ffn_up_shexp, err, errlen) ||
+        !required_tensorf(m, "blk.%u.ffn_down_shexp.weight", il, &l->ffn_down_shexp, err, errlen)) {
+        return false;
+    }
+    if (il < DS4_N_HASH_LAYER &&
+        !required_tensorf(m, "blk.%u.ffn_gate_tid2eid.weight", il, &l->ffn_gate_tid2eid, err, errlen)) {
+        return false;
+    }
+    return true;
 }
 
 /* Bind tensor names once into the fixed DS4 layer layout.  This is the point
  * where stringly GGUF metadata becomes direct model-specific pointers. */
-static void weights_bind(
+static bool weights_bind(
         ds4_weights     *w,
         const ds4_model *m,
         bool             load_slice,
@@ -3591,13 +3605,14 @@ static void weights_bind(
         bool             optional_output,
         char *err, size_t errlen) {
     memset(w, 0, sizeof(*w));
-    w->token_embd       = required_tensor(m, "token_embd.weight");
-    w->output_hc_base   = required_tensor(m, "output_hc_base.weight");
-    w->output_hc_fn     = required_tensor(m, "output_hc_fn.weight");
-    w->output_hc_scale  = required_tensor(m, "output_hc_scale.weight");
-    w->output_norm      = required_tensor(m, "output_norm.weight");
-    w->output           = required_tensor(m, "output.weight");
-
+    if (!required_tensor(m, "token_embd.weight", &w->token_embd, err, errlen) ||
+        !required_tensor(m, "output_hc_base.weight", &w->output_hc_base, err, errlen) ||
+        !required_tensor(m, "output_hc_fn.weight", &w->output_hc_fn, err, errlen) ||
+        !required_tensor(m, "output_hc_scale.weight", &w->output_hc_scale, err, errlen) ||
+        !required_tensor(m, "output_norm.weight", &w->output_norm, err, errlen) ||
+        !required_tensor(m, "output.weight", &w->output, err, errlen)) {
+        return false;
+    }
     uint32_t start = 0;
     uint32_t end = DS4_N_LAYER - 1u;
     bool require_token_embd = true;
@@ -3613,17 +3628,17 @@ static void weights_bind(
     }
 
     if (require_token_embd) {
-        w->token_embd = required_tensor(m, "token_embd.weight");
+         if (!required_tensor(m, "token_embd.weight", &w->token_embd, err, errlen)) return false;
     } else {
         w->token_embd = model_find_tensor(m, "token_embd.weight");
     }
-    weights_bind_output(w, m, require_output, optional_output);
+    if (!weights_bind_output(w, m, require_output, optional_output, err, errlen)) return false;
 
     for (uint32_t il = start; il <= end; il++) {
-        weights_bind_layer(&w->layer[il], m, il);
+        if (!weights_bind_layer(&w->layer[il], m, il, err, errlen)) return false;
     }
 
-    weights_validate_layout(w, start, end, require_token_embd, require_output, err, errlen);
+    return weights_validate_layout(w, start, end, require_token_embd, require_output, err, errlen);
 }
 
 typedef struct {
