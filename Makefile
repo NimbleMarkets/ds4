@@ -36,8 +36,8 @@ METAL_EMBED := ds4_metal_sources.inc
 
 ifeq ($(UNAME_S),Darwin)
 METAL_LDLIBS := $(LDLIBS) -framework Foundation -framework Metal
-CORE_OBJS = ds4.o ds4_distributed.o ds4_metal.o
-CPU_CORE_OBJS = ds4_cpu.o ds4_distributed.o
+CORE_OBJS = ds4.o ds4_distributed.o ds4_metal.o ds4_stderr.o
+CPU_CORE_OBJS = ds4_cpu.o ds4_distributed.o ds4_stderr.o
 else
 CFLAGS += -D_GNU_SOURCE -fno-finite-math-only
 CUDA_HOME ?= /usr/local/cuda
@@ -47,8 +47,8 @@ ifneq ($(strip $(CUDA_ARCH)),)
 NVCC_ARCH_FLAGS := -arch=$(CUDA_ARCH)
 endif
 NVCCFLAGS ?= -O3 -g -lineinfo --use_fast_math $(NVCC_ARCH_FLAGS) -Xcompiler $(NATIVE_CPU_FLAG) -Xcompiler -pthread
-CORE_OBJS = ds4.o ds4_distributed.o ds4_cuda.o
-CPU_CORE_OBJS = ds4_cpu.o ds4_distributed.o
+CORE_OBJS = ds4.o ds4_distributed.o ds4_cuda.o ds4_stderr.o
+CPU_CORE_OBJS = ds4_cpu.o ds4_distributed.o ds4_stderr.o
 CUDA_LDLIBS ?= -lm -Xcompiler -pthread -L$(CUDA_HOME)/targets/sbsa-linux/lib -L$(CUDA_HOME)/lib64 -lcudart -lcublas
 METAL_LDLIBS := $(LDLIBS)
 endif
@@ -102,10 +102,10 @@ cpu: ds4_cli_cpu.o ds4_server_cpu.o ds4_bench_cpu.o ds4_eval_cpu.o ds4_agent_cpu
 	$(CC) $(CFLAGS) -o ds4-eval ds4_eval_cpu.o ds4_help.o $(CPU_CORE_OBJS) $(LDLIBS)
 	$(CC) $(CFLAGS) -o ds4-agent ds4_agent_cpu.o ds4_help.o ds4_web.o ds4_kvstore.o linenoise.o $(CPU_CORE_OBJS) $(LDLIBS)
 
-shared: ds4_pic.o ds4_distributed_pic.o ds4_metal_pic.o
+shared: ds4_pic.o ds4_distributed_pic.o ds4_metal_pic.o ds4_stderr_pic.o
 	$(CC) $(CFLAGS) -fPIC -dynamiclib -install_name @rpath/$(SHLIB) -o $(SHLIB) $^ $(METAL_LDLIBS)
 
-shared-cpu: ds4_cpu_pic.o ds4_distributed_pic.o
+shared-cpu: ds4_cpu_pic.o ds4_distributed_pic.o ds4_stderr_pic.o
 	$(CC) $(CFLAGS) -fPIC -dynamiclib -install_name @rpath/$(SHLIB) -o $(SHLIB) $^ $(LDLIBS)
 
 cuda-regression:
@@ -161,24 +161,27 @@ cpu: ds4_cli_cpu.o ds4_server_cpu.o ds4_bench_cpu.o ds4_eval_cpu.o ds4_agent_cpu
 	$(CC) $(CFLAGS) -o ds4-eval ds4_eval_cpu.o ds4_help.o $(CPU_CORE_OBJS) $(LDLIBS)
 	$(CC) $(CFLAGS) -o ds4-agent ds4_agent_cpu.o ds4_help.o ds4_web.o ds4_kvstore.o linenoise.o $(CPU_CORE_OBJS) $(LDLIBS)
 
-shared: ds4_pic.o ds4_distributed_pic.o ds4_cuda_pic.o
+shared: ds4_pic.o ds4_distributed_pic.o ds4_cuda_pic.o ds4_stderr_pic.o
 	$(NVCC) $(NVCCFLAGS) -Xcompiler -fPIC --shared -o $(SHLIB) $^ $(CUDA_LDLIBS)
 
-shared-cpu: ds4_cpu_pic.o ds4_distributed_pic.o
+shared-cpu: ds4_cpu_pic.o ds4_distributed_pic.o ds4_stderr_pic.o
 	$(CC) $(CFLAGS) -fPIC -shared -Wl,-soname,$(SHLIB) -o $(SHLIB) $^ $(LDLIBS)
 
 cuda-regression: tests/cuda_long_context_smoke
 	./tests/cuda_long_context_smoke
 endif
 
-ds4.o: ds4.c ds4.h ds4_distributed.h ds4_gpu.h
+ds4.o: ds4.c ds4.h ds4_distributed.h ds4_gpu.h ds4_stderr.h
 	$(CC) $(CFLAGS) -c -o $@ ds4.c
 
 ds4_cli.o: ds4_cli.c ds4.h ds4_distributed.h ds4_help.h linenoise.h
 	$(CC) $(CFLAGS) -c -o $@ ds4_cli.c
 
-ds4_distributed.o: ds4_distributed.c ds4_distributed.h ds4.h
+ds4_distributed.o: ds4_distributed.c ds4_distributed.h ds4.h ds4_stderr.h
 	$(CC) $(CFLAGS) -c -o $@ ds4_distributed.c
+
+ds4_stderr.o: ds4_stderr.c ds4_stderr.h
+	$(CC) $(CFLAGS) -c -o $@ ds4_stderr.c
 
 ds4_help.o: ds4_help.c ds4_help.h
 	$(CC) $(CFLAGS) -c -o $@ ds4_help.c
@@ -213,7 +216,7 @@ rax.o: rax.c rax.h rax_malloc.h
 linenoise.o: linenoise.c linenoise.h
 	$(CC) $(CFLAGS) -c -o $@ linenoise.c
 
-ds4_cpu.o: ds4.c ds4.h ds4_distributed.h ds4_gpu.h
+ds4_cpu.o: ds4.c ds4.h ds4_distributed.h ds4_gpu.h ds4_stderr.h
 	$(CC) $(CFLAGS) -DDS4_NO_GPU -c -o $@ ds4.c
 
 ds4_cli_cpu.o: ds4_cli.c ds4.h ds4_distributed.h ds4_help.h linenoise.h
@@ -234,27 +237,30 @@ ds4_agent_cpu.o: ds4_agent.c ds4.h ds4_distributed.h ds4_help.h ds4_kvstore.h ds
 check-metal: ds4_metal.m ds4_gpu.h $(METAL_EMBED) $(METAL_SRCS)
 	$(CC) $(OBJCFLAGS) -fsyntax-only ds4_metal.m
 
-ds4_metal.o: ds4_metal.m ds4_gpu.h $(METAL_SRCS)
+ds4_metal.o: ds4_metal.m ds4_gpu.h ds4_stderr.h $(METAL_SRCS)
 	$(CC) $(OBJCFLAGS) -c -o $@ ds4_metal.m
 
-ds4_cuda.o: ds4_cuda.cu ds4_gpu.h ds4_iq2_tables_cuda.inc
+ds4_cuda.o: ds4_cuda.cu ds4_gpu.h ds4_stderr.h ds4_iq2_tables_cuda.inc
 	$(NVCC) $(NVCCFLAGS) -c -o $@ ds4_cuda.cu
 
 # Position-independent objects for the libds4 shared library.  Kept separate
 # from the executable objects above so the perf-tuned binaries are untouched.
-ds4_pic.o: ds4.c ds4.h ds4_gpu.h
+ds4_pic.o: ds4.c ds4.h ds4_gpu.h ds4_stderr.h
 	$(CC) $(CFLAGS) -fPIC -c -o $@ ds4.c
 
-ds4_cpu_pic.o: ds4.c ds4.h ds4_gpu.h
+ds4_cpu_pic.o: ds4.c ds4.h ds4_gpu.h ds4_stderr.h
 	$(CC) $(CFLAGS) -fPIC -DDS4_NO_GPU -c -o $@ ds4.c
 
-ds4_distributed_pic.o: ds4_distributed.c ds4_distributed.h ds4.h
+ds4_distributed_pic.o: ds4_distributed.c ds4_distributed.h ds4.h ds4_stderr.h
 	$(CC) $(CFLAGS) -fPIC -c -o $@ ds4_distributed.c
 
-ds4_metal_pic.o: ds4_metal.m ds4_gpu.h $(METAL_EMBED) $(METAL_SRCS)
+ds4_stderr_pic.o: ds4_stderr.c ds4_stderr.h
+	$(CC) $(CFLAGS) -fPIC -c -o $@ ds4_stderr.c
+
+ds4_metal_pic.o: ds4_metal.m ds4_gpu.h ds4_stderr.h $(METAL_EMBED) $(METAL_SRCS)
 	$(CC) $(OBJCFLAGS) -fPIC -c -o $@ ds4_metal.m
 
-ds4_cuda_pic.o: ds4_cuda.cu ds4_gpu.h ds4_iq2_tables_cuda.inc
+ds4_cuda_pic.o: ds4_cuda.cu ds4_gpu.h ds4_stderr.h ds4_iq2_tables_cuda.inc
 	$(NVCC) $(NVCCFLAGS) -Xcompiler -fPIC -c -o $@ ds4_cuda.cu
 
 tests/cuda_long_context_smoke: tests/cuda_long_context_smoke.o ds4_cuda.o

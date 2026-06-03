@@ -42,6 +42,8 @@
 #ifndef DS4_NO_GPU
 #include "ds4_gpu.h"
 #endif
+
+#include "ds4_stderr.h"
 #if defined(__ARM_NEON)
 #include <arm_neon.h>
 #endif
@@ -595,6 +597,7 @@ typedef struct {
 
 static void ds4_die(const char *msg) {
     fprintf(stderr, "ds4: %s\n", msg);
+    fflush(stderr);
     exit(1);
 }
 
@@ -623,6 +626,7 @@ static uint32_t ds4_expected_layer_compress_ratio(uint32_t il) {
 
 static void ds4_die_errno(const char *what, const char *path) {
     fprintf(stderr, "ds4: %s '%s': %s\n", what, path, strerror(errno));
+    fflush(stderr);
     exit(1);
 }
 
