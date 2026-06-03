@@ -9,10 +9,30 @@ endif
 
 DEBUG_FLAGS ?= -g
 CFLAGS ?= -O3 -ffast-math $(DEBUG_FLAGS) $(NATIVE_CPU_FLAG) -Wall -Wextra -std=c99
-OBJCFLAGS ?= -O3 -ffast-math $(DEBUG_FLAGS) $(NATIVE_CPU_FLAG) -Wall -Wextra -fobjc-arc
+OBJCFLAGS ?= -O3 -ffast-math $(DEBUG_FLAGS) $(NATIVE_CPU_FLAG) -Wall -Wextra -Wno-c23-extensions -fobjc-arc
 
 LDLIBS ?= -lm -pthread
-METAL_SRCS := $(wildcard metal/*.metal)
+METAL_SRCS := \
+	metal/flash_attn.metal \
+	metal/dense.metal \
+	metal/moe.metal \
+	metal/dsv4_hc.metal \
+	metal/unary.metal \
+	metal/dsv4_kv.metal \
+	metal/dsv4_rope.metal \
+	metal/dsv4_misc.metal \
+	metal/argsort.metal \
+	metal/cpy.metal \
+	metal/concat.metal \
+	metal/get_rows.metal \
+	metal/sum_rows.metal \
+	metal/softmax.metal \
+	metal/repeat.metal \
+	metal/glu.metal \
+	metal/norm.metal \
+	metal/bin.metal \
+	metal/set_rows.metal
+METAL_EMBED := ds4_metal_sources.inc
 
 ifeq ($(UNAME_S),Darwin)
 METAL_LDLIBS := $(LDLIBS) -framework Foundation -framework Metal
@@ -33,7 +53,8 @@ CUDA_LDLIBS ?= -lm -Xcompiler -pthread -L$(CUDA_HOME)/targets/sbsa-linux/lib -L$
 METAL_LDLIBS := $(LDLIBS)
 endif
 
-.PHONY: all help clean test cpu cuda cuda-spark cuda-generic cuda-regression
+.PHONY: all help clean test cpu cuda cuda-spark cuda-generic cuda-regression \
+        check-metal
 
 ifeq ($(UNAME_S),Darwin)
 all: ds4 ds4-server ds4-bench ds4-eval ds4-agent
@@ -42,6 +63,7 @@ help:
 	@echo "DS4 build targets:"
 	@echo "  make              Build Metal ./ds4, ./ds4-server, ./ds4-bench, ./ds4-eval, and ./ds4-agent"
 	@echo "  make cpu          Build CPU-only ./ds4, ./ds4-server, ./ds4-bench, ./ds4-eval, and ./ds4-agent"
+	@echo "  make check-metal  Verify #embed can read every Metal source"
 	@echo "  make test         Build and run tests"
 	@echo "  make clean        Remove build outputs"
 
@@ -78,6 +100,7 @@ help:
 	@echo "  make cuda-generic        Build CUDA for a generic local CUDA GPU"
 	@echo "  make cuda CUDA_ARCH=sm_N Build CUDA with an explicit nvcc -arch value"
 	@echo "  make cpu                 Build CPU-only ./ds4, ./ds4-server, ./ds4-bench, ./ds4-eval, and ./ds4-agent"
+	@echo "  make check-metal         Verify #embed can read every Metal source"
 	@echo "  make test                Build and run tests"
 	@echo "  make clean               Remove build outputs"
 
@@ -180,6 +203,9 @@ ds4_eval_cpu.o: ds4_eval.c ds4.h ds4_distributed.h ds4_help.h
 
 ds4_agent_cpu.o: ds4_agent.c ds4.h ds4_distributed.h ds4_help.h ds4_kvstore.h ds4_web.h linenoise.h
 	$(CC) $(CFLAGS) -DDS4_NO_GPU -c -o $@ ds4_agent.c
+
+check-metal: ds4_metal.m ds4_gpu.h $(METAL_EMBED) $(METAL_SRCS)
+	$(CC) $(OBJCFLAGS) -fsyntax-only ds4_metal.m
 
 ds4_metal.o: ds4_metal.m ds4_gpu.h $(METAL_SRCS)
 	$(CC) $(OBJCFLAGS) -c -o $@ ds4_metal.m
