@@ -36,6 +36,7 @@
 #include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
+#include "ds4_stderr.h"
 
 /* =========================================================================
  * Protocol Constants And Wire Records

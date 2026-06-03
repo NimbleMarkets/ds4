@@ -108,6 +108,8 @@ static uint32_t metal_graph_cuda_tp_output_tiers_for_head(
 #include "ds4_gpu.h"
 #endif
 
+#include "ds4_stderr.h"
+
 /* Non-CUDA builds (Mac/Metal, CPU-only) never link ds4_cuda.cu. Provide
  * stubs for the multi-GPU plumbing multi-GPU functions and globals declared in
  * ds4_gpu_mgpu.h. These keep the linker happy on Mac/Metal and on CPU
@@ -1051,6 +1053,7 @@ typedef struct {
 
 static void ds4_die(const char *msg) {
     fprintf(stderr, "ds4: %s\n", msg);
+    fflush(stderr);
     exit(1);
 }
 
@@ -1080,6 +1083,7 @@ static uint32_t ds4_expected_layer_compress_ratio(uint32_t il) {
 
 static void ds4_die_errno(const char *what, const char *path) {
     fprintf(stderr, "ds4: %s '%s': %s\n", what, path, strerror(errno));
+    fflush(stderr);
     exit(1);
 }
 

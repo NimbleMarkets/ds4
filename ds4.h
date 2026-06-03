@@ -474,4 +474,13 @@ int ds4_session_load_layer_payload(ds4_session *s, FILE *fp,
                                    uint32_t layer_start, uint32_t layer_end,
                                    char *err, size_t errlen);
 
+/* Redirect stderr to fp.  Pass NULL to restore stderr.
+ * Caller retains ownership of the FILE pointer and is responsible for closing it.
+ */
+void ds4_set_stderr(FILE *fp);
+/* Redirect stderr to fd.  Pass -1 to restore stderr.
+ * Caller passes ownership to ds4, which will close it.
+ */
+void ds4_set_stderr_fd(int fd);
+
 #endif
