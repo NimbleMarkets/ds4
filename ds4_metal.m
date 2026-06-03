@@ -26,6 +26,7 @@
 #include "ds4_gpu.h"
 #include "ds4_image.h"
 #include "ds4_metal_sources.inc"
+#include "ds4_stderr.h"
 
 /*
  * Objective-C Metal glue for the C engine.
