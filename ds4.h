@@ -483,4 +483,13 @@ void ds4_set_stderr(FILE *fp);
  */
 void ds4_set_stderr_fd(int fd);
 
+/* Fatal-invariant handler callback. Called immediately before engine exit/abort.
+ * Pass NULL to restore the default (no handler - just exits). */
+#ifndef DS4_ABORT_FN_DEFINED
+#define DS4_ABORT_FN_DEFINED
+typedef void (*ds4_abort_fn)(void *ud, const char *msg);
 #endif
+void ds4_abort_set(ds4_abort_fn fn, void *ud);
+
+#endif
+
