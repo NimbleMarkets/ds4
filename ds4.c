@@ -362,6 +362,9 @@ ds4_gpu_ctx g_gpu[DS4_MAX_GPUS];
 int         g_n_gpus = 0;
 int         g_gpu_peer_ok[DS4_MAX_GPUS][DS4_MAX_GPUS];
 #endif
+
+#include "ds4_stderr.h"
+
 #if defined(__ARM_NEON)
 #include <arm_neon.h>
 #endif
@@ -1065,6 +1068,7 @@ typedef struct {
 
 static void ds4_die(const char *msg) {
     fprintf(stderr, "ds4: %s\n", msg);
+    fflush(stderr);
     exit(1);
 }
 
@@ -1094,6 +1098,7 @@ static uint32_t ds4_expected_layer_compress_ratio(uint32_t il) {
 
 static void ds4_die_errno(const char *what, const char *path) {
     fprintf(stderr, "ds4: %s '%s': %s\n", what, path, strerror(errno));
+    fflush(stderr);
     exit(1);
 }
 
