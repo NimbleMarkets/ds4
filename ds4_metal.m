@@ -21,6 +21,7 @@
 
 #include "ds4.h"
 #include "ds4_gpu.h"
+#include "ds4_metal_sources.inc"
 
 /*
  * Objective-C Metal glue for the C engine.
@@ -2767,69 +2768,16 @@ static const char *ds4_gpu_source =
 
 static NSString *ds4_gpu_full_source(void) {
     NSString *base = [NSString stringWithUTF8String:ds4_gpu_source];
-    NSFileManager *fm = [NSFileManager defaultManager];
-    /*
-     * Kernels are kept as separate files for review, then concatenated into one
-     * Metal library.  Environment overrides are still honored so a diagnostic
-     * run can swap one source file without changing the executable.
-     */
-    NSArray<NSArray<NSString *> *> *required_sources = @[
-        @[@"DS4_METAL_FLASH_ATTN_SOURCE", @"metal/flash_attn.metal"],
-        @[@"DS4_METAL_DENSE_SOURCE",      @"metal/dense.metal"],
-        @[@"DS4_METAL_MOE_SOURCE",        @"metal/moe.metal"],
-        @[@"DS4_METAL_DSV4_HC_SOURCE",    @"metal/dsv4_hc.metal"],
-        @[@"DS4_METAL_UNARY_SOURCE",      @"metal/unary.metal"],
-        @[@"DS4_METAL_DSV4_KV_SOURCE",    @"metal/dsv4_kv.metal"],
-        @[@"DS4_METAL_DSV4_ROPE_SOURCE",  @"metal/dsv4_rope.metal"],
-        @[@"DS4_METAL_DSV4_MISC_SOURCE",  @"metal/dsv4_misc.metal"],
-        @[@"DS4_METAL_ARGSORT_SOURCE",    @"metal/argsort.metal"],
-        @[@"DS4_METAL_CPY_SOURCE",        @"metal/cpy.metal"],
-        @[@"DS4_METAL_CONCAT_SOURCE",     @"metal/concat.metal"],
-        @[@"DS4_METAL_GET_ROWS_SOURCE",   @"metal/get_rows.metal"],
-        @[@"DS4_METAL_SUM_ROWS_SOURCE",   @"metal/sum_rows.metal"],
-        @[@"DS4_METAL_SOFTMAX_SOURCE",    @"metal/softmax.metal"],
-        @[@"DS4_METAL_REPEAT_SOURCE",     @"metal/repeat.metal"],
-        @[@"DS4_METAL_GLU_SOURCE",        @"metal/glu.metal"],
-        @[@"DS4_METAL_NORM_SOURCE",       @"metal/norm.metal"],
-        @[@"DS4_METAL_BIN_SOURCE",        @"metal/bin.metal"],
-        @[@"DS4_METAL_SET_ROWS_SOURCE",   @"metal/set_rows.metal"],
-    ];
-
     NSMutableString *source = [NSMutableString stringWithString:base];
-    for (NSArray<NSString *> *spec in required_sources) {
-        const char *override_path = getenv([spec[0] UTF8String]);
-        NSMutableArray<NSString *> *paths = [NSMutableArray array];
-        if (override_path && override_path[0]) {
-            [paths addObject:[NSString stringWithUTF8String:override_path]];
-        }
-        [paths addObject:spec[1]];
-        [paths addObject:[@"./" stringByAppendingString:spec[1]]];
-
-        NSString *loaded = nil;
-        NSString *loaded_path = nil;
-        for (NSString *path in paths) {
-            if (![fm fileExistsAtPath:path]) continue;
-
-            NSError *error = nil;
-            loaded = [NSString stringWithContentsOfFile:path
-                                               encoding:NSUTF8StringEncoding
-                                                  error:&error];
-            if (!loaded) {
-                fprintf(stderr, "ds4: failed to read Metal source %s: %s\n",
-                        [path UTF8String], [[error localizedDescription] UTF8String]);
-                return nil;
-            }
-            loaded_path = path;
-            break;
-        }
-
-        if (!loaded) {
+    for (size_t i = 0; i < ds4_metal_embedded_source_count; i++) {
+        NSString *path = [NSString stringWithUTF8String:ds4_metal_embedded_sources[i].path];
+        NSString *loaded = [NSString stringWithUTF8String:ds4_metal_embedded_sources[i].source];
+        if (!path || !loaded) {
             fprintf(stderr,
-                    "ds4: Metal source %s not found (set %s to override)\n",
-                    [spec[1] UTF8String], [spec[0] UTF8String]);
+                    "ds4: embedded Metal source %zu is invalid\n", i);
             return nil;
         }
-        [source appendFormat:@"\n// appended %@\n%@\n", loaded_path, loaded];
+        [source appendFormat:@"\n// appended %@\n%@\n", path, loaded];
     }
     return source;
 }
