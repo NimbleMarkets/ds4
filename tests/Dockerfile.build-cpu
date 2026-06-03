@@ -1,0 +1,23 @@
+# Dockerfile to test CPU builds
+#
+# docker build -f tests/Dockerfile.build-cpu -t ds4-cpu-build .
+
+FROM ubuntu:24.04
+
+# Prevent interactive prompts during installation
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install dependencies needed for CPU build
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    make \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set up working directory
+WORKDIR /workspace
+
+# Copy source code
+COPY . .
+
+# Run the CPU-only build and shared library build
+CMD ["sh", "-c", "make clean && make cpu && make shared-cpu"]
