@@ -1,12 +1,16 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <stdbool.h>
+#include <stdlib.h>
 
 #define DS4_STDERR_NO_REDEFINE
 #include "ds4_stderr.h"
 
 FILE *ds4_stderr = NULL;
 static bool ds4_stderr_needs_close = false;
+
+static ds4_abort_fn g_abort_fn = NULL;
+static void *g_abort_ud = NULL;
 
 static void ds4_stderr_cleanup(void) {
     if (ds4_stderr && ds4_stderr_needs_close) {
@@ -55,4 +59,39 @@ void ds4_set_stderr_fd(int fd) {
             close(dupfd);
         }
     }
+}
+
+/* ds4_abort_set registers a fatal invariant callback.
+ * Pass NULL to restore the default (no handler - just exits/aborts). */
+void ds4_abort_set(ds4_abort_fn fn, void *ud) {
+    g_abort_fn = fn;
+    g_abort_ud = ud;
+}
+
+void ds4_abort_helper(const char *msg) {
+    if (ds4_stderr) {
+        fflush(ds4_stderr);
+    }
+    fflush(stderr);
+
+    if (g_abort_fn) {
+        g_abort_fn(g_abort_ud, msg);
+    }
+
+    // Default fallback is to call the real abort()
+    abort();
+}
+
+void ds4_exit_helper(int code) {
+    if (ds4_stderr) {
+        fflush(ds4_stderr);
+    }
+    fflush(stderr);
+
+    if (g_abort_fn) {
+        g_abort_fn(g_abort_ud, "ds4: process exit requested");
+    }
+
+    // Default fallback is to call the real exit()
+    exit(code);
 }
