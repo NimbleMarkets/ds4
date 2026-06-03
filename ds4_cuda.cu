@@ -25,6 +25,10 @@
 #include "cuda/mmq/ds4_repack.h"
 #include "ds4_image.h"
 
+extern "C" {
+#include "ds4_stderr.h"
+}
+
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
