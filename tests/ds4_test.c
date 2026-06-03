@@ -1,6 +1,7 @@
 #define DS4_SERVER_TEST
 #define DS4_SERVER_TEST_NO_MAIN
 #include "../ds4_server.c"
+#include <setjmp.h>
 #ifndef DS4_NO_GPU
 #include "../ds4_gpu.h"
 #include <math.h>
@@ -6410,6 +6411,41 @@ static void test_server_unit_group(void) {
     ds4_server_unit_tests_run();
 }
 
+extern void ds4_test_invoke_die(const char *msg);
+
+static jmp_buf abort_jmp;
+static int     abort_calls;
+static char    abort_last_msg[256];
+
+static void test_abort_capture(void *ud, const char *msg) {
+    (void)ud;
+    abort_calls++;
+    snprintf(abort_last_msg, sizeof(abort_last_msg), "%s", msg);
+    /* Bounce out so the engine never reaches abort() and the test process
+     * survives to assert. */
+    longjmp(abort_jmp, 1);
+}
+
+static void test_abort_handler(void) {
+    abort_calls = 0;
+    abort_last_msg[0] = '\0';
+
+    ds4_abort_set(test_abort_capture, NULL);
+
+    if (setjmp(abort_jmp) == 0) {
+        ds4_test_invoke_die("invariant violated for test");
+        TEST_ASSERT(!"ds4_test_invoke_die returned without firing the handler");
+    }
+
+    TEST_ASSERT(abort_calls == 1);
+    TEST_ASSERT(!strcmp(abort_last_msg, "invariant violated for test"));
+
+    /* Restore the default */
+    abort_calls = 0;
+    ds4_abort_set(NULL, NULL);
+    TEST_ASSERT(abort_calls == 0);
+}
+
 typedef void (*test_fn)(void);
 
 typedef struct {
@@ -6435,6 +6471,7 @@ static const ds4_test_entry test_entries[] = {
     {"--dspark-verify-depth", "dspark-verify-depth", "DSpark speculative verify commits autoregressive-identical tokens at draft depth > 2", test_dspark_verify_depth},
 #endif
     {"--server", "server", "server parser/rendering/cache unit tests", test_server_unit_group},
+    {"--abort-handler", "abort-handler", "ds4_abort_set hook fires before abort() with the message", test_abort_handler},
 };
 
 static void test_print_help(const char *prog) {
