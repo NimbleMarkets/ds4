@@ -598,7 +598,7 @@ typedef struct {
 static void ds4_die(const char *msg) {
     fprintf(stderr, "ds4: %s\n", msg);
     fflush(stderr);
-    exit(1);
+    ds4_abort_helper(msg);
 }
 
 /* Attention compression is read from GGUF metadata after validating that it
@@ -625,9 +625,11 @@ static uint32_t ds4_expected_layer_compress_ratio(uint32_t il) {
 }
 
 static void ds4_die_errno(const char *what, const char *path) {
-    fprintf(stderr, "ds4: %s '%s': %s\n", what, path, strerror(errno));
+    char buf[512];
+    snprintf(buf, sizeof(buf), "%s '%s': %s", what, path, strerror(errno));
+    fprintf(stderr, "ds4: %s\n", buf);
     fflush(stderr);
-    exit(1);
+    ds4_abort_helper(buf);
 }
 
 static bool ds4_streq(ds4_str s, const char *z) {
@@ -664,13 +666,16 @@ static void ds4_alloc_guard_end(void) {
 
 static void ds4_alloc_guard_check(const char *op, size_t size) {
     if (!g_alloc_guard_enabled) return;
-    fprintf(stderr,
-            "ds4: internal allocation during %s: %s(%zu). "
-            "CPU decode is expected to reuse preallocated scratch buffers.\n",
+    char buf[512];
+    snprintf(buf, sizeof(buf),
+            "internal allocation during %s: %s(%zu). "
+            "CPU decode is expected to reuse preallocated scratch buffers.",
             g_alloc_guard_phase ? g_alloc_guard_phase : "guarded phase",
             op,
             size);
-    exit(1);
+    fprintf(stderr, "ds4: %s\n", buf);
+    fflush(stderr);
+    ds4_abort_helper(buf);
 }
 
 static void *xcalloc(size_t n, size_t size) {
@@ -26626,3 +26631,8 @@ int ds4_session_ctx(ds4_session *s) {
 int ds4_session_prefill_cap(ds4_session *s) {
     return s ? (int)s->prefill_cap : 0;
 }
+
+void ds4_test_invoke_die(const char *msg) {
+    ds4_die(msg);
+}
+
