@@ -7,6 +7,9 @@
 /ds4_agent_test
 /ds4_server_test
 /ds4_test
+/libds4.dylib
+/libds4.so
+/libds4.dll
 /ds4flash.gguf
 /TODO.md
 /gguf/
