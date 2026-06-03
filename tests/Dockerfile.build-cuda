@@ -1,0 +1,49 @@
+# Dockerfile to test CUDA builds
+#
+# docker build --platform linux/amd64 -f tests/Dockerfile.build-cuda -t ds4-cuda-amd64-build .
+# docker build --platform linux/arm64 -f tests/Dockerfile.build-cuda -t ds4-cuda-arm64-build .
+
+FROM ubuntu:24.04
+
+# Prevent interactive prompts during installation
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install dependencies needed to download and install CUDA
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    wget \
+    ca-certificates \
+    build-essential \
+    gnupg \
+    && rm -rf /var/lib/apt/lists/*
+
+# Automatically detect architecture (arm64/sbsa or amd64/x86_64) and install appropriate CUDA 13.0 toolkit
+RUN arch=$(dpkg --print-architecture) && \
+    if [ "$arch" = "arm64" ]; then \
+        cuda_arch="sbsa"; \
+    elif [ "$arch" = "amd64" ]; then \
+        cuda_arch="x86_64"; \
+    else \
+        echo "Unsupported architecture: $arch" && exit 1; \
+    fi && \
+    wget -q https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/${cuda_arch}/cuda-keyring_1.1-1_all.deb && \
+    dpkg -i cuda-keyring_1.1-1_all.deb && \
+    rm cuda-keyring_1.1-1_all.deb && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+    cuda-toolkit-13-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Add CUDA to PATH
+ENV PATH="/usr/local/cuda/bin:${PATH}"
+
+# Set up working directory
+WORKDIR /workspace
+
+# Copy source code
+COPY . .
+
+# Set default CUDA arch (matching CI env for x86_64; on arm64 it is ignored/defaulted in Makefile)
+ENV CUDA_ARCH=compute_75
+
+# Run the build
+CMD ["sh", "-c", "arch=$(dpkg --print-architecture) && if [ \"$arch\" = \"arm64\" ]; then make shared; else make shared CUDA_ARCH=compute_75; fi"]
