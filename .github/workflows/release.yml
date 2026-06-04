@@ -41,6 +41,20 @@ jobs:
       - name: Build libds4 (Metal)
         run: make shared NATIVE_CPU_FLAG="$CPU_FLAG_ARM64_MACOS"
 
+      - name: Code Sign libds4.dylib
+        env:
+          MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
+          MACOS_SIGN_PASSWORD: ${{ secrets.MACOS_SIGN_PASSWORD }}
+        run: .github/scripts/macos-sign.sh libds4.dylib
+
+      - name: Notarize libds4.dylib
+        env:
+          MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
+          MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
+        run: .github/scripts/macos-notarize.sh libds4.dylib
+
       - name: Package
         run: |
           PKG="libds4-${GITHUB_REF_NAME}-macos-arm64-metal"
@@ -131,7 +145,7 @@ jobs:
       - name: Generate checksums
         run: |
           cd artifacts
-          sha256sum * > SHA256SUMS
+          sha256sum -- * > SHA256SUMS
 
       # Sign Sigstore build-provenance attestations for each shared library
       # archive. Consumers verify with:
