@@ -476,10 +476,15 @@ int ds4_session_load_layer_payload(ds4_session *s, FILE *fp,
 
 /* Redirect stderr to fp.  Pass NULL to restore stderr.
  * Caller retains ownership of the FILE pointer and is responsible for closing it.
+ *
+ * These functions are not thread-safe; the caller must serialize
+ * changes and must not redirect stderr while another thread may be
+ * writing to it.
  */
 void ds4_set_stderr(FILE *fp);
 /* Redirect stderr to fd.  Pass -1 to restore stderr.
- * Caller passes ownership to ds4, which will close it.
+ * The library dups the fd internally and takes ownership of the dup.
+ * The caller retains their original fd.
  */
 void ds4_set_stderr_fd(int fd);
 
