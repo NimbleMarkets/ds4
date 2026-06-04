@@ -2,6 +2,8 @@
   <img src="logo.svg" alt="DwarfStar logo" width="220">
 </p>
 
+**This is a fork maintained by NimbleMarkets.  It focuses on hosting `ds4` as a shared library for use in projects like [ds4go](https://github.com/NimbleMarkets/ds4go).**
+
 **DwarfStar** aims to be the best way to run a few excellent large
 language models on consumer hardware (that is, hardware that people
 can actually own). To reach this goal, we are building
