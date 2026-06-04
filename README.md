@@ -1,5 +1,7 @@
 # DwarfStar
 
+**This is a fork maintained by NimbleMarkets.  It focuses on hosting `ds4` as a shared library for use in projects like [ds4go](https://github.com/NimbleMarkets/ds4go).**
+
 **DwarfStar** is a small native inference engine optimized first for
 **DeepSeek V4 Flash**, with support for **DeepSeek V4 PRO** on very high-memory
 machines. It is
