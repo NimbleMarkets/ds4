@@ -75,7 +75,7 @@ SHLIB := libds4.so
 endif
 
 .PHONY: all help clean test test-rocm test-metal-session-batch test-mxfp4-cuda test-mxfp4-rocm test-cuda-session-batch test-cuda-mixed-batch dspark-acceptance dspark-verify-depth mtp-verify-depth cpu cuda cuda-spark cuda-generic cuda-regression strix-halo rocm \
-        check-metal shared shared-cpu
+	check-metal shared shared-metal shared-cuda shared-rocm shared-cpu
 
 ifeq ($(UNAME_S),Darwin)
 .PHONY: metal-decode-schedule-bench metal-prefill-variant-bench check-mxfp4-half-lut
@@ -86,7 +86,7 @@ help:
 	@echo "DS4 build targets:"
 	@echo "  make              Build Metal ./ds4, ./ds4-server, ./ds4-bench, ./ds4-eval, and ./ds4-agent"
 	@echo "  make cpu          Build CPU-only ./ds4, ./ds4-server, ./ds4-bench, ./ds4-eval, and ./ds4-agent"
-	@echo "  make shared       Build Metal ./$(SHLIB) (FFI shared library)"
+	@echo "  make shared-metal Build Metal ./$(SHLIB) (FFI shared library)"
 	@echo "  make shared-cpu   Build CPU-only ./$(SHLIB)"
 	@echo "  make check-metal  Verify #embed can read every Metal source"
 	@echo "  make test         Build and run tests"
@@ -160,7 +160,11 @@ cpu: ds4_cli_cpu.o ds4_server_cpu.o ds4_bench_cpu.o ds4_eval_cpu.o ds4_agent_cpu
 	$(CC) $(CFLAGS) -o ds4-eval ds4_eval_cpu.o ds4_help.o $(CPU_CORE_OBJS) $(LDLIBS)
 	$(CC) $(CFLAGS) -o ds4-agent ds4_agent_cpu.o ds4_help.o ds4_web.o ds4_kvstore.o linenoise.o ds4_gpu_args_cpu.o $(CPU_CORE_OBJS) $(LDLIBS)
 
-shared: ds4_pic.o ds4_distributed_pic.o ds4_metal_pic.o ds4_ssd_pic.o ds4_stderr_pic.o
+shared:
+	@echo "error: make shared is ambiguous; use shared-metal or shared-cpu" >&2
+	@exit 2
+
+shared-metal: ds4_pic.o ds4_distributed_pic.o ds4_metal_pic.o ds4_ssd_pic.o ds4_stderr_pic.o
 	$(CC) $(CFLAGS) -fPIC -dynamiclib -install_name @rpath/$(SHLIB) -o $(SHLIB) $^ $(METAL_LDLIBS)
 
 shared-cpu: ds4_cpu_pic.o ds4_distributed_pic.o ds4_ssd_pic.o ds4_stderr_pic.o
@@ -181,7 +185,8 @@ help:
 	@echo "  make test-mxfp4-rocm     Build and run the synthetic ROCm MXFP4 MoE test"
 	@echo "  make test-rocm           Core regression suite on ROCm-only hosts"
 	@echo "  make cpu                 Build CPU-only ./ds4, ./ds4-server, ./ds4-bench, ./ds4-eval, and ./ds4-agent"
-	@echo "  make shared [CUDA_ARCH=] Build CUDA ./$(SHLIB) (FFI shared library)"
+	@echo "  make shared-cuda         Build CUDA ./$(SHLIB) (FFI shared library)"
+	@echo "  make shared-rocm         Build ROCM ./$(SHLIB) (FFI shared library)"
 	@echo "  make shared-cpu          Build CPU-only ./$(SHLIB)"
 	@echo "  make check-metal         Verify #embed can read every Metal source"
 	@echo "  make test                Build and run tests"
@@ -205,7 +210,7 @@ cuda:
 
 strix-halo:
 	$(MAKE) -B ds4 ds4-server ds4-bench ds4-eval ds4-agent \
-		CORE_OBJS="ds4.o ds4_distributed.o ds4_tp.o ds4_ssd.o ds4_rocm.o ds4_rocm_compat.o ds4_rocm_unavailable.o ds4_layer_pack.o" \
+		CORE_OBJS="ds4.o ds4_distributed.o ds4_tp.o ds4_ssd.o ds4_rocm.o ds4_rocm_compat.o ds4_rocm_unavailable.o ds4_layer_pack.o ds4_stderr.o" \
 		CFLAGS="$(CFLAGS) $(ROCM_HOST_CFLAGS) -DDS4_ROCM_BUILD" \
 		DS4_LINK="$(HIPCC) $(ROCM_CFLAGS)" \
 		DS4_LINK_LIBS="$(ROCM_LDLIBS)"
@@ -260,8 +265,15 @@ cpu: ds4_cli_cpu.o ds4_server_cpu.o ds4_bench_cpu.o ds4_eval_cpu.o ds4_agent_cpu
 	$(CC) $(CFLAGS) -o ds4-eval ds4_eval_cpu.o ds4_help.o $(CPU_CORE_OBJS) $(LDLIBS)
 	$(CC) $(CFLAGS) -o ds4-agent ds4_agent_cpu.o ds4_help.o ds4_web.o ds4_kvstore.o linenoise.o ds4_gpu_args_cpu.o $(CPU_CORE_OBJS) $(LDLIBS)
 
-shared: ds4_pic.o ds4_distributed_pic.o ds4_cuda_pic.o ds4_ssd_pic.o ds4_stderr_pic.o
+shared:
+	@echo "error: make shared is ambiguous; use shared-cuda, shared-rocm, or shared-cpu" >&2
+	@exit 2
+
+shared-cuda: ds4_pic.o ds4_distributed_pic.o ds4_cuda_pic.o ds4_ssd_pic.o ds4_stderr_pic.o
 	$(NVCC) $(NVCCFLAGS) -Xcompiler -fPIC --shared -o $(SHLIB) $^ $(CUDA_LDLIBS)
+
+shared-rocm: ds4_rocm_core_pic.o ds4_distributed_pic.o ds4_rocm_pic.o ds4_ssd_pic.o ds4_stderr_pic.o
+	$(HIPCC) $(ROCM_CFLAGS) -fPIC -shared -o $(SHLIB) $^ $(ROCM_LDLIBS)
 
 shared-cpu: ds4_cpu_pic.o ds4_distributed_pic.o ds4_ssd_pic.o ds4_stderr_pic.o
 	$(CC) $(CFLAGS) -fPIC -shared -Wl,-soname,$(SHLIB) -o $(SHLIB) $^ $(LDLIBS)
@@ -387,7 +399,7 @@ cuda/mmq/mmvq.o: cuda/mmq/mmvq.cu cuda/mmq/mmvq.cuh cuda/mmq/common.cuh cuda/mmq
 cuda/mmq/ds4_repack.o: cuda/mmq/ds4_repack.cu cuda/mmq/ds4_repack.h
 	$(NVCC) $(NVCCFLAGS) -std=c++17 -c -o $@ $<
 
-ds4_rocm.o: ds4_rocm.cu ds4_gpu.h ds4_iq2_tables_cuda.inc $(ROCM_SRCS)
+ds4_rocm.o: ds4_rocm.cu ds4_gpu.h ds4_stderr.h ds4_iq2_tables_cuda.inc $(ROCM_SRCS)
 	$(HIPCC) $(ROCM_CFLAGS) -c -o $@ ds4_rocm.cu
 
 tests/test_mxfp4_rocm.o: tests/test_mxfp4_rocm.c ds4_gpu.h
@@ -416,6 +428,9 @@ ds4_rocm_unavailable.o: ds4_rocm_unavailable.cu
 ds4_pic.o: ds4.c ds4.h ds4_gpu.h ds4_stderr.h
 	$(CC) $(CFLAGS) -fPIC -c -o $@ ds4.c
 
+ds4_rocm_core_pic.o: ds4.c ds4.h ds4_gpu.h ds4_stderr.h
+	$(CC) $(CFLAGS) -DDS4_ROCM_BUILD -fPIC -c -o $@ ds4.c
+
 ds4_ssd_pic.o: ds4_ssd.c ds4_ssd.h
 	$(CC) $(CFLAGS) -fPIC -c -o $@ ds4_ssd.c
 
@@ -434,7 +449,7 @@ ds4_metal_pic.o: ds4_metal.m ds4_gpu.h ds4_stderr.h $(METAL_EMBED) $(METAL_SRCS)
 ds4_cuda_pic.o: ds4_cuda.cu ds4_gpu.h ds4_stderr.h ds4_iq2_tables_cuda.inc
 	$(NVCC) $(NVCCFLAGS) -Xcompiler -fPIC -c -o $@ ds4_cuda.cu
 
-ds4_rocm_pic.o: ds4_rocm.cu ds4_gpu.h ds4_iq2_tables_cuda.inc $(ROCM_SRCS)
+ds4_rocm_pic.o: ds4_rocm.cu ds4_gpu.h ds4_stderr.h ds4_iq2_tables_cuda.inc $(ROCM_SRCS)
 	$(HIPCC) $(ROCM_CFLAGS) -fPIC -c -o $@ ds4_rocm.cu
 
 tests/cuda_long_context_smoke: tests/cuda_long_context_smoke.o ds4_cuda.o $(MMQ_OBJS)
