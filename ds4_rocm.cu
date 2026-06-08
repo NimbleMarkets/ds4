@@ -40,6 +40,10 @@
 
 #include "ds4_gpu.h"
 
+extern "C" {
+#include "ds4_stderr.h"
+}
+
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
