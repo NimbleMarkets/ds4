@@ -30,6 +30,8 @@ env:
   # The arm64/GB10 build deliberately omits -arch (the upstream `cuda-spark`
   # path, "the fastest path on GB10") and relies on CUDA 13's modern default.
   CUDA_ARCH: compute_75
+  ROCM_VERSION: 7.2.4
+  ROCM_ARCH: gfx1151
 
 jobs:
   macos-metal-arm64:
@@ -39,7 +41,7 @@ jobs:
       - uses: actions/checkout@v6
 
       - name: Build libds4 (Metal)
-        run: make shared NATIVE_CPU_FLAG="$CPU_FLAG_ARM64_MACOS"
+        run: make shared-metal NATIVE_CPU_FLAG="$CPU_FLAG_ARM64_MACOS"
 
       - name: Code Sign libds4.dylib
         env:
@@ -83,7 +85,7 @@ jobs:
       - name: Build libds4 (CUDA)
         run: |
           export PATH="/usr/local/cuda/bin:$PATH"
-          make shared NATIVE_CPU_FLAG="$CPU_FLAG_X86" CUDA_ARCH="$CUDA_ARCH"
+          make shared-cuda NATIVE_CPU_FLAG="$CPU_FLAG_X86" CUDA_ARCH="$CUDA_ARCH"
 
       - name: Package
         run: |
@@ -114,7 +116,7 @@ jobs:
         run: |
           export PATH="/usr/local/cuda/bin:$PATH"
           # GB10: omit -arch (upstream `cuda-spark` path), CUDA 13's default suffices.
-          make shared NATIVE_CPU_FLAG="$CPU_FLAG_ARM64_LINUX"
+          make shared-cuda NATIVE_CPU_FLAG="$CPU_FLAG_ARM64_LINUX"
 
       - name: Package
         run: |
@@ -128,9 +130,36 @@ jobs:
           name: libds4-linux-arm64-cuda
           path: libds4-*-linux-arm64-cuda.tar.gz
 
+  linux-rocm-x86_64:
+    name: Linux ROCm (x86_64)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install ROCm
+        run: bash .github/scripts/install-rocm-ubuntu.sh
+
+      - name: Build libds4 (ROCm)
+        run: |
+          export PATH="/opt/rocm/bin:$PATH"
+          export LD_LIBRARY_PATH="/opt/rocm/lib:${LD_LIBRARY_PATH:-}"
+          make shared-rocm NATIVE_CPU_FLAG="$CPU_FLAG_X86" ROCM_ARCH="$ROCM_ARCH"
+
+      - name: Package
+        run: |
+          PKG="libds4-${GITHUB_REF_NAME}-linux-x86_64-rocm"
+          mkdir -p "$PKG"
+          cp libds4.so ds4.h LICENSE "$PKG/"
+          tar -czf "$PKG.tar.gz" "$PKG"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: libds4-linux-x86_64-rocm
+          path: libds4-*-linux-x86_64-rocm.tar.gz
+
   release:
     name: Publish GitHub Release
-    needs: [macos-metal-arm64, linux-cuda-x86_64, linux-cuda-arm64]
+    needs: [macos-metal-arm64, linux-cuda-x86_64, linux-cuda-arm64, linux-rocm-x86_64]
     runs-on: ubuntu-latest
     permissions:
       contents: write       # create the Release and upload assets
