@@ -46,4 +46,4 @@ COPY . .
 ENV CUDA_ARCH=compute_75
 
 # Run the build
-CMD ["sh", "-c", "arch=$(dpkg --print-architecture) && if [ \"$arch\" = \"arm64\" ]; then make shared-cuda; else make shared-cuda CUDA_ARCH=compute_75; fi"]
+CMD ["sh", "-c", "arch=$(dpkg --print-architecture) && make clean && if [ \"$arch\" = \"arm64\" ]; then make shared-cuda; else make shared-cuda CUDA_ARCH=compute_75; fi"]
