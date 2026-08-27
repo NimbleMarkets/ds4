@@ -227,7 +227,7 @@ test-rocm:
 	$(MAKE) -B ds4_test ds4_agent_test ds4-eval q4k-dot-test mxfp4-dot-test \
 		tests/test_layer_pack tests/test_engine_mgpu_placement tests/test_gpu_args \
 		ds4 ds4-server ds4-bench ds4-agent \
-		CORE_OBJS="ds4.o ds4_distributed.o ds4_tp.o ds4_ssd.o ds4_rocm.o ds4_rocm_compat.o ds4_rocm_unavailable.o ds4_layer_pack.o" \
+		CORE_OBJS="ds4.o ds4_distributed.o ds4_tp.o ds4_ssd.o ds4_rocm.o ds4_rocm_compat.o ds4_rocm_unavailable.o ds4_layer_pack.o ds4_stderr.o" \
 		CFLAGS="$(CFLAGS) $(ROCM_HOST_CFLAGS) -DDS4_ROCM_BUILD" \
 		DS4_LINK="$(HIPCC) $(ROCM_CFLAGS)" \
 		DS4_LINK_LIBS="$(ROCM_LDLIBS)"
@@ -407,13 +407,13 @@ ds4_rocm.o: ds4_rocm.cu ds4_gpu.h ds4_stderr.h ds4_iq2_tables_cuda.inc $(ROCM_SR
 tests/test_mxfp4_rocm.o: tests/test_mxfp4_rocm.c ds4_gpu.h
 	$(CC) $(filter-out -ffast-math,$(CFLAGS)) $(ROCM_HOST_CFLAGS) -DDS4_ROCM_BUILD -I. -c -o $@ $<
 
-tests/test_mxfp4_rocm: tests/test_mxfp4_rocm.o ds4_rocm.o
+tests/test_mxfp4_rocm: tests/test_mxfp4_rocm.o ds4_rocm.o ds4_stderr.o
 	$(HIPCC) $(ROCM_CFLAGS) -o $@ $^ $(ROCM_LDLIBS)
 
 tests/bench_mxfp4_rocm.o: tests/bench_mxfp4_rocm.c ds4_gpu.h
 	$(CC) $(filter-out -ffast-math,$(CFLAGS)) $(ROCM_HOST_CFLAGS) -DDS4_ROCM_BUILD -I. -c -o $@ $<
 
-tests/bench_mxfp4_rocm: tests/bench_mxfp4_rocm.o ds4_rocm.o
+tests/bench_mxfp4_rocm: tests/bench_mxfp4_rocm.o ds4_rocm.o ds4_stderr.o
 	$(HIPCC) $(ROCM_CFLAGS) -o $@ $^ $(ROCM_LDLIBS)
 
 test-mxfp4-rocm: tests/test_mxfp4_rocm
