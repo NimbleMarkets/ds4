@@ -338,7 +338,7 @@ shared:
 shared-cuda: ds4_pic.o ds4_distributed_pic.o ds4_tp_pic.o ds4_cuda_pic.o ds4_ssd_pic.o ds4_image_pic.o ds4_layer_pack_pic.o ds4_stderr_pic.o $(MMQ_PIC_OBJS)
 	$(NVCC) $(NVCCFLAGS) -Xcompiler -fPIC --shared -o $(SHLIB) $^ $(CUDA_LDLIBS)
 
-shared-rocm: ds4_rocm_core_pic.o ds4_distributed_pic.o ds4_tp_pic.o ds4_rocm_pic.o ds4_ssd_pic.o ds4_image_pic.o ds4_layer_pack_pic.o ds4_stderr_pic.o $(ROCM_MMQ_PIC_OBJS)
+shared-rocm: ds4_rocm_core_pic.o ds4_distributed_pic.o ds4_tp_pic.o ds4_rocm_pic.o ds4_rocm_compat_pic.o ds4_rocm_unavailable_pic.o ds4_ssd_pic.o ds4_image_pic.o ds4_layer_pack_pic.o ds4_stderr_pic.o $(ROCM_MMQ_PIC_OBJS)
 	$(HIPCC) $(ROCM_CFLAGS) -fPIC -shared -o $(SHLIB) $^ $(ROCM_LDLIBS)
 
 shared-cpu: ds4_cpu_pic.o ds4_distributed_pic.o ds4_tp_pic.o ds4_ssd_pic.o ds4_image_pic.o ds4_layer_pack_pic.o ds4_stderr_pic.o
@@ -652,6 +652,12 @@ cuda/mmq/%_pic.o: cuda/mmq/%.cu $(MMQ_HEADERS)
 
 ds4_rocm_pic.o: ds4_rocm.cu ds4_rocm.h ds4_rocm_memory.h ds4_linux_memory.h ds4_gpu.h ds4_glm53_vision_gpu.cuh ds4_deepseek4_vision_gpu.cuh ds4_image.h ds4_stderr.h ds4_iq2_tables_cuda.inc $(ROCM_SRCS)
 	$(HIPCC) $(ROCM_CFLAGS) -fPIC -c -o $@ ds4_rocm.cu
+
+ds4_rocm_compat_pic.o: ds4_rocm_compat.cu ds4_gpu.h ds4_gpu_mgpu.h ds4_gpu_args.h ds4_rocm_memory.h ds4_linux_memory.h
+	$(HIPCC) $(ROCM_CFLAGS) -fPIC -c -o $@ ds4_rocm_compat.cu
+
+ds4_rocm_unavailable_pic.o: ds4_rocm_unavailable.cu
+	$(HIPCC) $(ROCM_CFLAGS) -fPIC -c -o $@ ds4_rocm_unavailable.cu
 
 # PIC twins of the vendored mmq objects for the ROCm shared library.
 cuda/mmq/%.rocm_pic.o: cuda/mmq/%.cu $(MMQ_HEADERS) ds4_rocm_memory.h ds4_linux_memory.h
