@@ -5,7 +5,7 @@ ROCM_VERSION="${ROCM_VERSION:-7.2.4}"
 UBUNTU_CODENAME="${UBUNTU_CODENAME:-}"
 
 # Slim ROCm set DS4 needs; the full `rocm` metapackage overflows the runner disk.
-ROCM_PACKAGES="${ROCM_PACKAGES:-rocm-hip-runtime-dev hipblas-dev hipblaslt-dev hipcub-dev rocwmma-dev}"
+ROCM_PACKAGES="${ROCM_PACKAGES:-rocm-hip-runtime-dev hipblas-dev hipblaslt-dev rocblas-dev hipcub-dev rocwmma-dev}"
 
 arch="$(dpkg --print-architecture)"
 if [ "$arch" != "amd64" ]; then
