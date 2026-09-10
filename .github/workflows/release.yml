@@ -61,7 +61,7 @@ jobs:
         run: |
           PKG="libds4-${GITHUB_REF_NAME}-macos-arm64-metal"
           mkdir -p "$PKG"
-          cp libds4.dylib ds4.h LICENSE "$PKG/"
+          cp libds4.dylib ds4.h ds4_ssd.h LICENSE "$PKG/"
           tar -czf "$PKG.tar.gz" "$PKG"
 
       - uses: actions/upload-artifact@v4
@@ -91,7 +91,7 @@ jobs:
         run: |
           PKG="libds4-${GITHUB_REF_NAME}-linux-x86_64-cuda"
           mkdir -p "$PKG"
-          cp libds4.so ds4.h LICENSE "$PKG/"
+          cp libds4.so ds4.h ds4_ssd.h LICENSE "$PKG/"
           tar -czf "$PKG.tar.gz" "$PKG"
 
       - uses: actions/upload-artifact@v4
@@ -122,7 +122,7 @@ jobs:
         run: |
           PKG="libds4-${GITHUB_REF_NAME}-linux-arm64-cuda"
           mkdir -p "$PKG"
-          cp libds4.so ds4.h LICENSE "$PKG/"
+          cp libds4.so ds4.h ds4_ssd.h LICENSE "$PKG/"
           tar -czf "$PKG.tar.gz" "$PKG"
 
       - uses: actions/upload-artifact@v4
@@ -149,7 +149,7 @@ jobs:
         run: |
           PKG="libds4-${GITHUB_REF_NAME}-linux-x86_64-rocm"
           mkdir -p "$PKG"
-          cp libds4.so ds4.h LICENSE "$PKG/"
+          cp libds4.so ds4.h ds4_ssd.h LICENSE "$PKG/"
           tar -czf "$PKG.tar.gz" "$PKG"
 
       - uses: actions/upload-artifact@v4
