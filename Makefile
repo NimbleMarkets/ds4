@@ -66,6 +66,7 @@ ROCM_LDLIBS ?= -lm -pthread -lhipblas -lhipblaslt -lrocblas
 ROCM_MMQ_Y ?= 64
 ROCM_MMQ_FLAGS := $(ROCM_CFLAGS) -std=c++17 -DGGML_USE_HIP -DDS4_HIP_MMQ_Y=$(ROCM_MMQ_Y) $(MMQ_INCLUDES)
 ROCM_MMQ_OBJS := cuda/mmq/ds4_ggml_stubs.rocm.o cuda/mmq/ds4_mmq.rocm.o cuda/mmq/quantize.rocm.o cuda/mmq/mmid.rocm.o cuda/mmq/mmvq.rocm.o cuda/mmq/d2r_stubs.rocm.o
+ROCM_MMQ_PIC_OBJS := $(ROCM_MMQ_OBJS:.rocm.o=.rocm_pic.o)
 DS4_LINK ?= $(NVCC) $(NVCCFLAGS)
 DS4_LINK_LIBS ?= $(CUDA_LDLIBS)
 METAL_LDLIBS := $(LDLIBS)
@@ -159,7 +160,7 @@ metal-prefill-variant-bench: speed-bench/metal_prefill_variant_bench
 tests/test_mxfp4_metal.o: tests/test_mxfp4_metal.c ds4_gpu.h
 	$(CC) $(CFLAGS) -I. -c -o $@ $<
 
-tests/test_mxfp4_metal: tests/test_mxfp4_metal.o ds4_metal.o ds4_image.o
+tests/test_mxfp4_metal: tests/test_mxfp4_metal.o ds4_metal.o ds4_image.o ds4_stderr.o
 	$(CC) $(CFLAGS) -o $@ $^ $(METAL_LDLIBS)
 
 check-mxfp4-half-lut:
@@ -207,10 +208,10 @@ shared:
 	@echo "error: make shared is ambiguous; use shared-metal or shared-cpu" >&2
 	@exit 2
 
-shared-metal: ds4_pic.o ds4_distributed_pic.o ds4_tp_pic.o ds4_metal_pic.o ds4_ssd_pic.o ds4_layer_pack_pic.o ds4_stderr_pic.o
+shared-metal: ds4_pic.o ds4_distributed_pic.o ds4_tp_pic.o ds4_metal_pic.o ds4_ssd_pic.o ds4_image_pic.o ds4_layer_pack_pic.o ds4_stderr_pic.o
 	$(CC) $(CFLAGS) -fPIC -dynamiclib -install_name @rpath/$(SHLIB) -o $(SHLIB) $^ $(METAL_LDLIBS)
 
-shared-cpu: ds4_cpu_pic.o ds4_distributed_pic.o ds4_tp_pic.o ds4_ssd_pic.o ds4_layer_pack_pic.o ds4_stderr_pic.o
+shared-cpu: ds4_cpu_pic.o ds4_distributed_pic.o ds4_tp_pic.o ds4_ssd_pic.o ds4_image_pic.o ds4_layer_pack_pic.o ds4_stderr_pic.o
 	$(CC) $(CFLAGS) -fPIC -dynamiclib -install_name @rpath/$(SHLIB) -o $(SHLIB) $^ $(LDLIBS)
 
 cuda-regression:
@@ -334,13 +335,13 @@ shared:
 	@echo "error: make shared is ambiguous; use shared-cuda, shared-rocm, or shared-cpu" >&2
 	@exit 2
 
-shared-cuda: ds4_pic.o ds4_distributed_pic.o ds4_tp_pic.o ds4_cuda_pic.o ds4_ssd_pic.o ds4_layer_pack_pic.o ds4_stderr_pic.o $(MMQ_PIC_OBJS)
+shared-cuda: ds4_pic.o ds4_distributed_pic.o ds4_tp_pic.o ds4_cuda_pic.o ds4_ssd_pic.o ds4_image_pic.o ds4_layer_pack_pic.o ds4_stderr_pic.o $(MMQ_PIC_OBJS)
 	$(NVCC) $(NVCCFLAGS) -Xcompiler -fPIC --shared -o $(SHLIB) $^ $(CUDA_LDLIBS)
 
-shared-rocm: ds4_rocm_core_pic.o ds4_distributed_pic.o ds4_tp_pic.o ds4_rocm_pic.o ds4_ssd_pic.o ds4_layer_pack_pic.o ds4_stderr_pic.o
+shared-rocm: ds4_rocm_core_pic.o ds4_distributed_pic.o ds4_tp_pic.o ds4_rocm_pic.o ds4_ssd_pic.o ds4_image_pic.o ds4_layer_pack_pic.o ds4_stderr_pic.o $(ROCM_MMQ_PIC_OBJS)
 	$(HIPCC) $(ROCM_CFLAGS) -fPIC -shared -o $(SHLIB) $^ $(ROCM_LDLIBS)
 
-shared-cpu: ds4_cpu_pic.o ds4_distributed_pic.o ds4_tp_pic.o ds4_ssd_pic.o ds4_layer_pack_pic.o ds4_stderr_pic.o
+shared-cpu: ds4_cpu_pic.o ds4_distributed_pic.o ds4_tp_pic.o ds4_ssd_pic.o ds4_image_pic.o ds4_layer_pack_pic.o ds4_stderr_pic.o
 	$(CC) $(CFLAGS) -fPIC -shared -Wl,-soname,$(SHLIB) -o $(SHLIB) $^ $(LDLIBS)
 
 cuda-regression: tests/cuda_long_context_smoke
@@ -476,10 +477,10 @@ tests/test_deepseek4_vision_image: tests/test_deepseek4_vision_image.o ds4_image
 	$(CC) $(CFLAGS) -o $@ $^ -lm
 
 ifeq ($(UNAME_S),Darwin)
-$(GLM53_KDA_TEST): tests/test_glm53_kda.o ds4_metal.o ds4_image.o
+$(GLM53_KDA_TEST): tests/test_glm53_kda.o ds4_metal.o ds4_image.o ds4_stderr.o
 	$(CC) $(CFLAGS) -o $@ $^ $(METAL_LDLIBS)
 else
-$(GLM53_KDA_TEST): tests/test_glm53_kda.o ds4_cuda.o ds4_image.o $(MMQ_OBJS)
+$(GLM53_KDA_TEST): tests/test_glm53_kda.o ds4_cuda.o ds4_image.o ds4_stderr.o $(MMQ_OBJS)
 	$(NVCC) $(NVCCFLAGS) -o $@ $^ $(CUDA_LDLIBS)
 endif
 
@@ -490,7 +491,7 @@ test-glm53-kda: $(GLM53_KDA_TEST)
 tests/test_glm53_kda_rocm.o: tests/test_glm53_kda.c ds4_gpu.h
 	$(CC) $(filter-out -ffast-math,$(CFLAGS)) $(ROCM_HOST_CFLAGS) -DDS4_ROCM_BUILD -I. -c -o $@ $<
 
-$(GLM53_KDA_ROCM_TEST): tests/test_glm53_kda_rocm.o ds4_rocm.o ds4_image.o $(ROCM_MMQ_OBJS)
+$(GLM53_KDA_ROCM_TEST): tests/test_glm53_kda_rocm.o ds4_rocm.o ds4_image.o ds4_stderr.o $(ROCM_MMQ_OBJS)
 	$(HIPCC) $(ROCM_CFLAGS) -o $@ $^ $(ROCM_LDLIBS)
 
 test-glm53-kda-rocm: $(GLM53_KDA_ROCM_TEST)
@@ -499,7 +500,7 @@ test-glm53-kda-rocm: $(GLM53_KDA_ROCM_TEST)
 tests/test_glm_attention_rocm.o: tests/test_glm_attention.c ds4.h ds4_gpu.h ds4_linux_memory.h
 	$(CC) $(filter-out -ffast-math,$(CFLAGS)) $(ROCM_HOST_CFLAGS) -DDS4_ROCM_BUILD -I. -c -o $@ $<
 
-tests/test_glm_attention_rocm: tests/test_glm_attention_rocm.o ds4_rocm.o ds4_image.o $(ROCM_MMQ_OBJS)
+tests/test_glm_attention_rocm: tests/test_glm_attention_rocm.o ds4_rocm.o ds4_image.o ds4_stderr.o $(ROCM_MMQ_OBJS)
 	$(HIPCC) $(ROCM_CFLAGS) -o $@ $^ $(ROCM_LDLIBS)
 
 .PHONY: test-glm-attention-rocm
@@ -523,10 +524,10 @@ tests/test_glm_attention.o: tests/test_glm_attention.c ds4.h ds4_gpu.h ds4_linux
 	$(CC) $(filter-out -ffast-math,$(CFLAGS)) -I. -c -o $@ $<
 
 ifeq ($(UNAME_S),Darwin)
-tests/test_glm_attention: tests/test_glm_attention.o ds4_metal.o ds4_image.o
+tests/test_glm_attention: tests/test_glm_attention.o ds4_metal.o ds4_image.o ds4_stderr.o
 	$(CC) $(CFLAGS) -o $@ $^ $(METAL_LDLIBS)
 else
-tests/test_glm_attention: tests/test_glm_attention.o ds4_cuda.o ds4_image.o $(MMQ_OBJS)
+tests/test_glm_attention: tests/test_glm_attention.o ds4_cuda.o ds4_image.o ds4_stderr.o $(MMQ_OBJS)
 	$(NVCC) $(NVCCFLAGS) -o $@ $^ $(CUDA_LDLIBS)
 endif
 
@@ -612,16 +613,19 @@ ds4_rocm_unavailable.o: ds4_rocm_unavailable.cu
 
 # Position-independent objects for the libds4 shared library.  Kept separate
 # from the executable objects above so the perf-tuned binaries are untouched.
-ds4_pic.o: ds4.c ds4.h ds4_gpu.h ds4_stderr.h
+ds4_pic.o: ds4.c ds4.h ds4_gpu.h ds4_image.h ds4_linux_memory.h ds4_tool_text.h ds4_stderr.h
 	$(CC) $(CFLAGS) -fPIC -c -o $@ ds4.c
 
-ds4_rocm_core_pic.o: ds4.c ds4.h ds4_gpu.h ds4_stderr.h
+ds4_rocm_core_pic.o: ds4.c ds4.h ds4_gpu.h ds4_image.h ds4_linux_memory.h ds4_tool_text.h ds4_stderr.h
 	$(CC) $(CFLAGS) -DDS4_ROCM_BUILD -fPIC -c -o $@ ds4.c
 
 ds4_ssd_pic.o: ds4_ssd.c ds4_ssd.h
 	$(CC) $(CFLAGS) -fPIC -c -o $@ ds4_ssd.c
 
-ds4_cpu_pic.o: ds4.c ds4.h ds4_gpu.h ds4_stderr.h
+ds4_image_pic.o: ds4_image.c ds4_image.h third_party/iris/jpeg.h third_party/iris/png.h
+	$(CC) $(CFLAGS) -fPIC -c -o $@ ds4_image.c
+
+ds4_cpu_pic.o: ds4.c ds4.h ds4_gpu.h ds4_image.h ds4_linux_memory.h ds4_tool_text.h ds4_stderr.h
 	$(CC) $(CFLAGS) -Wno-unused-function -fPIC -DDS4_NO_GPU -c -o $@ ds4.c
 
 ds4_distributed_pic.o: ds4_distributed.c ds4_distributed.h ds4.h ds4_stderr.h
@@ -636,18 +640,25 @@ ds4_tp_pic.o: ds4_tp.c ds4_tp.h ds4.h ds4_ssd.h
 ds4_layer_pack_pic.o: ds4_layer_pack.c ds4_layer_pack.h
 	$(CC) $(CFLAGS) -fPIC -c -o $@ ds4_layer_pack.c
 
-ds4_metal_pic.o: ds4_metal.m ds4_gpu.h ds4_stderr.h $(METAL_EMBED) $(METAL_SRCS)
+ds4_metal_pic.o: ds4_metal.m ds4_gpu.h ds4_image.h ds4_stderr.h $(METAL_EMBED) $(METAL_SRCS)
 	$(CC) $(OBJCFLAGS) -fPIC -c -o $@ ds4_metal.m
 
-ds4_cuda_pic.o: ds4_cuda.cu ds4_gpu.h ds4_gpu_mgpu.h ds4_stderr.h ds4_iq2_tables_cuda.inc cuda/mmq/ds4_mmq.h
+ds4_cuda_pic.o: ds4_cuda.cu ds4_gpu.h ds4_gpu_mgpu.h ds4_glm53_vision_gpu.cuh ds4_deepseek4_vision_gpu.cuh ds4_image.h ds4_stderr.h ds4_iq2_tables_cuda.inc cuda/mmq/ds4_mmq.h
 	$(NVCC) $(NVCCFLAGS) -Xcompiler -fPIC -c -o $@ ds4_cuda.cu
 
 # PIC twins of the vendored mmq objects for the CUDA shared library.
 cuda/mmq/%_pic.o: cuda/mmq/%.cu $(MMQ_HEADERS)
 	$(NVCC) $(NVCCFLAGS) -std=c++17 $(MMQ_INCLUDES) -Xcompiler -fPIC -c -o $@ $<
 
-ds4_rocm_pic.o: ds4_rocm.cu ds4_gpu.h ds4_stderr.h ds4_iq2_tables_cuda.inc $(ROCM_SRCS)
+ds4_rocm_pic.o: ds4_rocm.cu ds4_rocm.h ds4_rocm_memory.h ds4_linux_memory.h ds4_gpu.h ds4_glm53_vision_gpu.cuh ds4_deepseek4_vision_gpu.cuh ds4_image.h ds4_stderr.h ds4_iq2_tables_cuda.inc $(ROCM_SRCS)
 	$(HIPCC) $(ROCM_CFLAGS) -fPIC -c -o $@ ds4_rocm.cu
+
+# PIC twins of the vendored mmq objects for the ROCm shared library.
+cuda/mmq/%.rocm_pic.o: cuda/mmq/%.cu $(MMQ_HEADERS) ds4_rocm_memory.h ds4_linux_memory.h
+	$(HIPCC) $(ROCM_MMQ_FLAGS) -fPIC -c -o $@ $<
+
+cuda/mmq/d2r_stubs.rocm_pic.o: cuda/mmq/test/d2r_stubs.cu cuda/mmq/ds4_mmq_d2r.cuh cuda/mmq/vendors/hip.h
+	$(HIPCC) $(ROCM_MMQ_FLAGS) -fPIC -c -o $@ $<
 
 tests/cuda_long_context_smoke: tests/cuda_long_context_smoke.o ds4_cuda.o ds4_stderr.o $(MMQ_OBJS)
 	$(NVCC) $(NVCCFLAGS) -o $@ $^ $(CUDA_LDLIBS)
