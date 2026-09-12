@@ -2111,10 +2111,28 @@ int ds4_tp_batch_gate_exchange(ds4_tp *tp, uint32_t layer, uint32_t rows,
 }
 
 /* Prefill batch gate: RDMA uses the pipelined registered-slab path above.
- * The fallback alternates 2MB TCP write/read rounds in the same order, so
- * neither side can fill its send buffer while the peer is also only writing
- * (the 4MB socket buffers absorb one round). */
+ * The fallback alternates TCP write/read rounds in the same order, so
+ * neither side can fill its send buffer while the peer is also only writing:
+ * the socket send buffer has to absorb one whole round from each side.
+ * tp_socket_tune() asks for 4MB, which makes a 2MB round safe, but Linux
+ * silently clamps SO_SNDBUF to 2 * net.core.wmem_max (416KB on a stock
+ * kernel) and only CAP_NET_ADMIN can exceed that, so size the round from
+ * what the kernel actually granted instead of what was requested. Half of
+ * the reported value leaves a 2x margin for the kernel's per-skb accounting
+ * on both AF_UNIX and TCP; macOS reports the full 4MB, keeping 2MB rounds. */
 #define DS4_TP_BIG_CHUNK (2ull * 1024ull * 1024ull)
+#define DS4_TP_BIG_CHUNK_MIN 4096ull
+
+static uint64_t tp_big_gate_chunk(int fd) {
+    int sndbuf = 0;
+    socklen_t len = sizeof(sndbuf);
+    if (getsockopt(fd, SOL_SOCKET, SO_SNDBUF, &sndbuf, &len) != 0 || sndbuf <= 0)
+        return DS4_TP_BIG_CHUNK;
+    uint64_t chunk = (uint64_t)sndbuf / 2u;
+    if (chunk > DS4_TP_BIG_CHUNK) chunk = DS4_TP_BIG_CHUNK;
+    if (chunk < DS4_TP_BIG_CHUNK_MIN) chunk = DS4_TP_BIG_CHUNK_MIN;
+    return chunk;
+}
 
 int ds4_tp_big_gate_exchange(ds4_tp *tp, uint32_t layer, uint64_t seq,
                              const void *out, void *in, uint64_t bytes) {
@@ -2173,10 +2191,10 @@ int ds4_tp_big_gate_exchange(ds4_tp *tp, uint32_t layer, uint64_t seq,
         return ok;
     }
 #endif
+    const uint64_t chunk = tp_big_gate_chunk(tp->data_fd);
     uint64_t off = 0;
     while (off < bytes) {
-        const uint64_t n = bytes - off > DS4_TP_BIG_CHUNK ?
-                           DS4_TP_BIG_CHUNK : bytes - off;
+        const uint64_t n = bytes - off > chunk ? chunk : bytes - off;
         if (!tp_write_full(tp->data_fd, (const char *)out + off, n)) return 0;
         if (!tp_read_full(tp->data_fd, (char *)in + off, n)) return 0;
         off += n;
