@@ -255,7 +255,7 @@ shared:
 	@echo "error: make shared is ambiguous; use shared-metal or shared-cpu" >&2
 	@exit 2
 
-shared-metal: ds4_pic.o ds4_distributed_pic.o ds4_tp_pic.o ds4_metal_pic.o ds4_ssd_pic.o ds4_image_pic.o ds4_layer_pack_pic.o ds4_stderr_pic.o
+shared-metal: ds4_pic.o ds4_distributed_pic.o ds4_tp_pic.o ds4_metal_pic.o ds4_ssd_pic.o ds4_image_pic.o ds4_layer_pack_pic.o ds4_engram_pic.o ds4_stderr_pic.o
 	$(CC) $(CFLAGS) -fPIC -dynamiclib -install_name @rpath/$(SHLIB) -o $(SHLIB) $^ $(METAL_LDLIBS)
 
 shared-cpu: ds4_cpu_pic.o ds4_distributed_pic.o ds4_tp_pic.o ds4_ssd_pic.o ds4_image_pic.o ds4_layer_pack_pic.o ds4_stderr_pic.o
@@ -680,7 +680,7 @@ ds4_rocm_unavailable.o: ds4_rocm_unavailable.cu
 
 # Position-independent objects for the libds4 shared library.  Kept separate
 # from the executable objects above so the perf-tuned binaries are untouched.
-ds4_pic.o: ds4.c ds4.h ds4_gpu.h ds4_image.h ds4_linux_memory.h ds4_tool_text.h ds4_stderr.h
+ds4_pic.o: ds4.c ds4.h ds4_gpu.h ds4_image.h ds4_engram.h ds4_linux_memory.h ds4_tool_text.h ds4_stderr.h
 	$(CC) $(CFLAGS) -fPIC -c -o $@ ds4.c
 
 ds4_rocm_core_pic.o: ds4.c ds4.h ds4_gpu.h ds4_image.h ds4_linux_memory.h ds4_tool_text.h ds4_stderr.h
@@ -691,6 +691,9 @@ ds4_ssd_pic.o: ds4_ssd.c ds4_ssd.h
 
 ds4_image_pic.o: ds4_image.c ds4_image.h third_party/iris/jpeg.h third_party/iris/png.h
 	$(CC) $(CFLAGS) -fPIC -c -o $@ ds4_image.c
+
+ds4_engram_pic.o: ds4_engram.c ds4_engram.h
+	$(CC) $(filter-out -ffast-math,$(CFLAGS)) -fPIC -c -o $@ ds4_engram.c
 
 ds4_cpu_pic.o: ds4.c ds4.h ds4_gpu.h ds4_image.h ds4_linux_memory.h ds4_tool_text.h ds4_stderr.h
 	$(CC) $(CFLAGS) -Wno-unused-function -fPIC -DDS4_NO_GPU -c -o $@ ds4.c
