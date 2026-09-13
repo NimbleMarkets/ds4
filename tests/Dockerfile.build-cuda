@@ -42,8 +42,10 @@ WORKDIR /workspace
 # Copy source code
 COPY . .
 
-# Set default CUDA arch (matching CI env for x86_64; on arm64 it is ignored/defaulted in Makefile)
+# x86_64 builds compute_75 PTX (matching CI). arm64 defaults to the GB10 build
+# (sm_121, the only one that compiles the MXFP4 kernels); override with
+# -e CUDA_ARCH_ARM64=compute_90 to exercise the generic sbsa variant.
 ENV CUDA_ARCH=compute_75
 
 # Run the build
-CMD ["sh", "-c", "arch=$(dpkg --print-architecture) && make clean && if [ \"$arch\" = \"arm64\" ]; then make shared-cuda; else make shared-cuda CUDA_ARCH=compute_75; fi"]
+CMD ["sh", "-c", "arch=$(dpkg --print-architecture) && make clean && if [ \"$arch\" = \"arm64\" ]; then make shared-cuda CUDA_ARCH=${CUDA_ARCH_ARM64:-sm_121}; else make shared-cuda CUDA_ARCH=compute_75; fi"]

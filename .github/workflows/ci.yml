@@ -60,8 +60,18 @@ jobs:
           make shared-cpu
 
   linux-cuda-arm64:
-    name: Linux CUDA (arm64/sbsa)
+    name: Linux CUDA (arm64, ${{ matrix.variant }})
     runs-on: ubuntu-24.04-arm
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Mirrors release.yml: sm_121 is the only build that compiles the
+          # MXFP4 kernels, so CI must cover it.
+          - variant: gb10
+            cuda_arch: sm_121
+          - variant: sbsa
+            cuda_arch: compute_90
     steps:
       - uses: actions/checkout@v6
       - name: Install CUDA toolkit
@@ -73,9 +83,9 @@ jobs:
       - name: Build shared library (CUDA)
         run: |
           export PATH="/usr/local/cuda/bin:$PATH"
-          # GB10: omit -arch (upstream `cuda-spark` path), CUDA 13's default suffices.
-          make shared-cuda
+          make shared-cuda CUDA_ARCH="${{ matrix.cuda_arch }}"
       - name: Build CPU-only variant
+        if: matrix.variant == 'sbsa'
         run: |
           make clean
           make cpu

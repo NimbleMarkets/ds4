@@ -100,8 +100,22 @@ jobs:
           path: libds4-*-linux-x86_64-cuda.tar.gz
 
   linux-cuda-arm64:
-    name: Linux CUDA (arm64/sbsa)
+    name: Linux CUDA (arm64, ${{ matrix.variant }})
     runs-on: ubuntu-24.04-arm
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # DGX Spark / GB10: native sm_121a code plus the MXFP4 kernels
+          # (upstream's `cuda-spark` path). Loads only on GB10-class parts.
+          - variant: gb10
+            cuda_arch: sm_121
+            asset: linux-arm64-gb10-cuda
+          # Generic sbsa: compute_90 PTX, JIT-compiled by the driver on Grace
+          # Hopper and newer. No MXFP4 kernels. Keeps the historical asset name.
+          - variant: sbsa
+            cuda_arch: compute_90
+            asset: linux-arm64-cuda
     steps:
       - uses: actions/checkout@v6
 
@@ -115,20 +129,19 @@ jobs:
       - name: Build libds4 (CUDA)
         run: |
           export PATH="/usr/local/cuda/bin:$PATH"
-          # GB10: omit -arch (upstream `cuda-spark` path), CUDA 13's default suffices.
-          make shared-cuda NATIVE_CPU_FLAG="$CPU_FLAG_ARM64_LINUX"
+          make shared-cuda NATIVE_CPU_FLAG="$CPU_FLAG_ARM64_LINUX" CUDA_ARCH="${{ matrix.cuda_arch }}"
 
       - name: Package
         run: |
-          PKG="libds4-${GITHUB_REF_NAME}-linux-arm64-cuda"
+          PKG="libds4-${GITHUB_REF_NAME}-${{ matrix.asset }}"
           mkdir -p "$PKG"
           cp libds4.so ds4.h ds4_ssd.h LICENSE "$PKG/"
           tar -czf "$PKG.tar.gz" "$PKG"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: libds4-linux-arm64-cuda
-          path: libds4-*-linux-arm64-cuda.tar.gz
+          name: libds4-${{ matrix.asset }}
+          path: libds4-*-${{ matrix.asset }}.tar.gz
 
   linux-rocm-x86_64:
     name: Linux ROCm (x86_64)
