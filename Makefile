@@ -55,7 +55,7 @@ NVCCFLAGS ?= -O3 -g -lineinfo --use_fast_math $(NVCC_ARCH_FLAGS) -Xcompiler $(NA
 MMQ_INCLUDES := -Icuda/mmq
 MMQ_OBJS := cuda/mmq/ds4_ggml_stubs.o cuda/mmq/ds4_mmq.o cuda/mmq/ds4_mmq_d2r.o cuda/mmq/quantize.o cuda/mmq/mmid.o cuda/mmq/mmvq.o cuda/mmq/ds4_repack.o
 MMQ_PIC_OBJS := $(MMQ_OBJS:.o=_pic.o)
-MMQ_HEADERS := $(wildcard cuda/mmq/*.cuh cuda/mmq/*.h)
+MMQ_HEADERS := $(wildcard cuda/mmq/*.cuh cuda/mmq/*.h) ds4_stderr.h
 CORE_OBJS = ds4.o ds4_image.o ds4_distributed.o ds4_tp.o ds4_ssd.o ds4_cuda.o ds4_layer_pack.o ds4_stderr.o $(MMQ_OBJS)
 
 CORE_OBJS = ds4.o ds4_image.o ds4_distributed.o ds4_tp.o ds4_ssd.o ds4_cuda.o ds4_layer_pack.o ds4_engram.o ds4_stderr.o $(MMQ_OBJS)
@@ -543,7 +543,7 @@ ds4.o: ds4.c ds4.h ds4_ssd.h ds4_distributed.h ds4_gpu.h ds4_gpu_tp.h ds4_deepse
 ds4_image.o: ds4_image.c ds4_image.h third_party/iris/jpeg.h third_party/iris/png.h
 	$(CC) $(CFLAGS) -c -o $@ ds4_image.c
 
-ds4_ssd.o: ds4_ssd.c ds4_ssd.h
+ds4_ssd.o: ds4_ssd.c ds4_ssd.h ds4_stderr.h
 	$(CC) $(CFLAGS) -c -o $@ ds4_ssd.c
 
 ds4_engram.o: ds4_engram.c ds4_engram.h
@@ -555,7 +555,7 @@ ds4_cli.o: ds4_cli.c ds4.h ds4_ssd.h ds4_distributed.h ds4_help.h ds4_prompt_pre
 ds4_distributed.o: ds4_distributed.c ds4_distributed.h ds4.h ds4_ssd.h ds4_stderr.h
 	$(CC) $(CFLAGS) -c -o $@ ds4_distributed.c
 
-ds4_tp.o: ds4_tp.c ds4_tp.h ds4.h ds4_ssd.h ds4_gpu.h ds4_gpu_tp.h
+ds4_tp.o: ds4_tp.c ds4_tp.h ds4.h ds4_ssd.h ds4_gpu.h ds4_gpu_tp.h ds4_stderr.h
 	$(CC) $(CFLAGS) -c -o $@ ds4_tp.c
 
 ds4_stderr.o: ds4_stderr.c ds4_stderr.h
@@ -887,7 +887,7 @@ ds4_pic.o: ds4.c ds4.h ds4_gpu.h ds4_image.h ds4_engram.h ds4_linux_memory.h ds4
 ds4_rocm_core_pic.o: ds4.c ds4.h ds4_gpu.h ds4_image.h ds4_linux_memory.h ds4_tool_text.h ds4_stderr.h
 	$(CC) $(CFLAGS) -DDS4_ROCM_BUILD -fPIC -c -o $@ ds4.c
 
-ds4_ssd_pic.o: ds4_ssd.c ds4_ssd.h
+ds4_ssd_pic.o: ds4_ssd.c ds4_ssd.h ds4_stderr.h
 	$(CC) $(CFLAGS) -fPIC -c -o $@ ds4_ssd.c
 
 ds4_image_pic.o: ds4_image.c ds4_image.h third_party/iris/jpeg.h third_party/iris/png.h
@@ -905,7 +905,7 @@ ds4_distributed_pic.o: ds4_distributed.c ds4_distributed.h ds4.h ds4_stderr.h
 ds4_stderr_pic.o: ds4_stderr.c ds4_stderr.h
 	$(CC) $(CFLAGS) -fPIC -c -o $@ ds4_stderr.c
 
-ds4_tp_pic.o: ds4_tp.c ds4_tp.h ds4.h ds4_ssd.h
+ds4_tp_pic.o: ds4_tp.c ds4_tp.h ds4.h ds4_ssd.h ds4_stderr.h
 	$(CC) $(CFLAGS) -fPIC -c -o $@ ds4_tp.c
 
 ds4_layer_pack_pic.o: ds4_layer_pack.c ds4_layer_pack.h
@@ -924,7 +924,7 @@ cuda/mmq/%_pic.o: cuda/mmq/%.cu $(MMQ_HEADERS)
 ds4_rocm_pic.o: ds4_rocm.cu ds4_rocm.h ds4_rocm_memory.h ds4_linux_memory.h ds4_gpu.h ds4_glm53_vision_gpu.cuh ds4_deepseek4_vision_gpu.cuh ds4_image.h ds4_stderr.h ds4_iq2_tables_cuda.inc $(ROCM_SRCS)
 	$(HIPCC) $(ROCM_CFLAGS) -fPIC -c -o $@ ds4_rocm.cu
 
-ds4_rocm_compat_pic.o: ds4_rocm_compat.cu ds4_gpu.h ds4_gpu_mgpu.h ds4_gpu_args.h ds4_rocm_memory.h ds4_linux_memory.h
+ds4_rocm_compat_pic.o: ds4_rocm_compat.cu ds4_gpu.h ds4_gpu_mgpu.h ds4_gpu_args.h ds4_rocm_memory.h ds4_linux_memory.h ds4_stderr.h
 	$(HIPCC) $(ROCM_CFLAGS) -fPIC -c -o $@ ds4_rocm_compat.cu
 
 ds4_rocm_unavailable_pic.o: ds4_rocm_unavailable.cu

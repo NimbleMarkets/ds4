@@ -9,6 +9,13 @@
 #include "ds4_gpu.h"
 #include "ds4_gpu_args.h"
 
+// Route this translation unit's stderr through the ds4 redirection helpers so
+// library consumers that call ds4_set_stderr() see these messages. Must come
+// after the system headers: ds4_stderr.h redefines stderr/abort/exit.
+extern "C" {
+#include "ds4_stderr.h"
+}
+
 ds4_gpu_ctx g_gpu[DS4_MAX_GPUS] = {};
 int g_n_gpus = 1;
 int g_gpu_peer_ok[DS4_MAX_GPUS][DS4_MAX_GPUS] = {{1}};

@@ -1,6 +1,13 @@
 #include "common.cuh"
 #include "mmid.cuh"
 
+// Route this translation unit's stderr through the ds4 redirection helpers so
+// library consumers that call ds4_set_stderr() see these messages. Must come
+// after the system headers: ds4_stderr.h redefines stderr/abort/exit.
+extern "C" {
+#include "../../ds4_stderr.h"
+}
+
 // To reduce shared memory use, store "it" and "iex_used" with 22/10 bits each.
 struct mm_ids_helper_store {
     uint32_t data;
