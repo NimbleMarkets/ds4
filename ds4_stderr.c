@@ -82,6 +82,19 @@ void ds4_abort_helper(const char *msg) {
     abort();
 }
 
+void ds4_fatal_helper(const char *msg, int code) {
+    if (ds4_stderr) {
+        fflush(ds4_stderr);
+    }
+    fflush(stderr);
+
+    if (g_abort_fn) {
+        g_abort_fn(g_abort_ud, msg);
+    }
+
+    exit(code);
+}
+
 void ds4_exit_helper(int code) {
     if (ds4_stderr) {
         fflush(ds4_stderr);

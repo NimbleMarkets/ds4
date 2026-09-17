@@ -1355,7 +1355,7 @@ typedef struct {
 static void ds4_die(const char *msg) {
     fprintf(stderr, "ds4: %s\n", msg);
     fflush(stderr);
-    ds4_abort_helper(msg);
+    ds4_fatal_helper(msg, 1);
 }
 
 /* Attention compression is read from GGUF metadata after validating that it
@@ -1402,7 +1402,7 @@ static void ds4_die_errno(const char *what, const char *path) {
     snprintf(buf, sizeof(buf), "%s '%s': %s", what, path, strerror(errno));
     fprintf(stderr, "ds4: %s\n", buf);
     fflush(stderr);
-    ds4_abort_helper(buf);
+    ds4_fatal_helper(buf, 1);
 }
 
 static bool ds4_streq(ds4_str s, const char *z) {
@@ -1463,7 +1463,7 @@ static void ds4_alloc_guard_check(const char *op, size_t size) {
             size);
     fprintf(stderr, "ds4: %s\n", buf);
     fflush(stderr);
-    ds4_abort_helper(buf);
+    ds4_fatal_helper(buf, 1);
 }
 
 static void *xcalloc(size_t n, size_t size) {

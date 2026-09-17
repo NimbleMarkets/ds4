@@ -879,6 +879,12 @@ ds4_rocm_unavailable.o: ds4_rocm_unavailable.cu
 
 # Position-independent objects for the libds4 shared library.  Kept separate
 # from the executable objects above so the perf-tuned binaries are untouched.
+# Upstream keeps adding headers (and dependency-only lines) for the regular
+# objects; the PIC twins would silently go stale, so make them depend on every
+# engine header instead of a hand-maintained list.
+DS4_PIC_HEADERS := $(wildcard ds4*.h ds4*.cuh ds4*.inc)
+ds4_pic.o ds4_rocm_core_pic.o ds4_cpu_pic.o ds4_metal_pic.o ds4_cuda_pic.o ds4_rocm_pic.o: $(DS4_PIC_HEADERS)
+
 ds4_pic.o: ds4.c ds4.h ds4_gpu.h ds4_image.h ds4_engram.h ds4_linux_memory.h ds4_tool_text.h ds4_stderr.h
 	$(CC) $(CFLAGS) -fPIC -c -o $@ ds4.c
 

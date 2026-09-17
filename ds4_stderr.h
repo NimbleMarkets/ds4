@@ -20,6 +20,10 @@ void ds4_abort_set(ds4_abort_fn fn, void *ud);
 
 void ds4_abort_helper(const char *msg) __attribute__((noreturn));
 void ds4_exit_helper(int code) __attribute__((noreturn));
+/* Fatal error path used by ds4_die(): fires the abort hook with the message,
+ * then exit(code) like upstream (not abort(), so callers that fork and check
+ * WEXITSTATUS keep working). */
+void ds4_fatal_helper(const char *msg, int code) __attribute__((noreturn));
 
 static inline FILE *ds4_get_stderr_helper(void) {
     extern FILE *ds4_stderr;
