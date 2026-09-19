@@ -37,6 +37,10 @@
 #endif
 #endif
 
+/* Route stderr through the ds4 redirection helpers (ds4_set_stderr). Must
+ * come after the system headers: ds4_stderr.h redefines stderr/abort/exit. */
+#include "ds4_stderr.h"
+
 #define DS4_TP_MAGIC UINT32_C(0x44533454) /* "DS4T" */
 #define DS4_TP_BATCH_MAGIC UINT32_C(0x44533442) /* "DS4B" */
 /* V4.1 CUDA workers now return half-logit frames after successful work. */

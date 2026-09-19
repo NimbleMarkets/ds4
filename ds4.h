@@ -638,4 +638,27 @@ int ds4_session_load_layer_payload(ds4_session *s, FILE *fp,
                                    uint32_t layer_start, uint32_t layer_end,
                                    char *err, size_t errlen);
 
+/* Redirect stderr to fp.  Pass NULL to restore stderr.
+ * Caller retains ownership of the FILE pointer and is responsible for closing it.
+ *
+ * These functions are not thread-safe; the caller must serialize
+ * changes and must not redirect stderr while another thread may be
+ * writing to it.
+ */
+void ds4_set_stderr(FILE *fp);
+/* Redirect stderr to fd.  Pass -1 to restore stderr.
+ * The library dups the fd internally and takes ownership of the dup.
+ * The caller retains their original fd.
+ */
+void ds4_set_stderr_fd(int fd);
+
+/* Fatal-invariant handler callback. Called immediately before engine exit/abort.
+ * Pass NULL to restore the default (no handler - just exits). */
+#ifndef DS4_ABORT_FN_DEFINED
+#define DS4_ABORT_FN_DEFINED
+typedef void (*ds4_abort_fn)(void *ud, const char *msg);
 #endif
+void ds4_abort_set(ds4_abort_fn fn, void *ud);
+
+#endif
+
