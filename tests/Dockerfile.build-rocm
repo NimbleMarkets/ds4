@@ -1,0 +1,51 @@
+# Dockerfile to test ROCm builds
+#
+# docker build --platform linux/amd64 -f tests/Dockerfile.build-rocm -t ds4-rocm-amd64-build .
+# docker build --platform linux/amd64 --build-arg ROCM_ARCH=gfx1151 -f tests/Dockerfile.build-rocm -t ds4-rocm-gfx1151-build .
+
+FROM ubuntu:24.04
+
+ARG ROCM_VERSION=7.2.4
+ARG ROCM_ARCH=gfx1151
+ARG UBUNTU_CODENAME=noble
+
+# Prevent interactive prompts during installation
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install dependencies needed to register AMD ROCm repositories and build DS4.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    wget \
+    ca-certificates \
+    build-essential \
+    gnupg \
+    && rm -rf /var/lib/apt/lists/*
+
+# Register AMD's ROCm package repositories for Ubuntu 24.04 and install ROCm.
+# AMD publishes ROCm Ubuntu packages for amd64; fail early on other platforms.
+RUN arch=$(dpkg --print-architecture) && \
+    if [ "$arch" != "amd64" ]; then \
+        echo "Unsupported ROCm build architecture: $arch (expected amd64)" && exit 1; \
+    fi && \
+    mkdir -p -m 0755 /etc/apt/keyrings && \
+    wget -qO- https://repo.radeon.com/rocm/rocm.gpg.key | gpg --dearmor -o /etc/apt/keyrings/rocm.gpg && \
+    printf "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/%s %s main\n" "$ROCM_VERSION" "$UBUNTU_CODENAME" > /etc/apt/sources.list.d/rocm.list && \
+    printf "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/graphics/%s/ubuntu %s main\n" "$ROCM_VERSION" "$UBUNTU_CODENAME" >> /etc/apt/sources.list.d/rocm.list && \
+    printf "Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600\n" > /etc/apt/preferences.d/rocm-pin-600 && \
+    apt-get update && apt-get install -y --no-install-recommends \
+    rocm \
+    && rm -rf /var/lib/apt/lists/*
+
+# Add ROCm tools and libraries to the build environment.
+ENV ROCM_PATH=/opt/rocm
+ENV PATH="${ROCM_PATH}/bin:${PATH}"
+ENV LD_LIBRARY_PATH="${ROCM_PATH}/lib:${LD_LIBRARY_PATH}"
+ENV ROCM_ARCH=${ROCM_ARCH}
+
+# Set up working directory
+WORKDIR /workspace
+
+# Copy source code
+COPY . .
+
+# Run the ROCm executable and shared library builds.
+CMD ["sh", "-c", "make clean && make rocm ROCM_ARCH=\"$ROCM_ARCH\" && make shared-rocm ROCM_ARCH=\"$ROCM_ARCH\""]
