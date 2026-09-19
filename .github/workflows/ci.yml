@@ -1,0 +1,106 @@
+name: CI
+
+# Build-checks every push and pull request. Does not publish anything —
+# releases are handled by release.yml on version tags.
+on:
+  push:
+    branches: ['**']
+    tags-ignore: ['**']   # tags are handled by release.yml
+  pull_request:
+
+# A newer push to the same branch/PR cancels an in-flight run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Virtual GPU arch for the x86_64 CUDA build. nvcc emits forward-compatible
+  # PTX that JIT-compiles on any GPU >= this. compute_75 (Turing) is the floor
+  # that has the __dp4a intrinsic ds4_cuda.cu needs.
+  # The arm64/GB10 build deliberately omits -arch (the upstream `cuda-spark`
+  # path, "the fastest path on GB10") and relies on CUDA 13's modern default.
+  CUDA_ARCH: compute_75
+  ROCM_VERSION: 7.2.4
+  ROCM_ARCH: gfx1151
+
+jobs:
+  macos-metal:
+    name: macOS Metal (arm64)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v6
+      - name: Verify Metal sources embed cleanly
+        run: make check-metal
+      - name: Build executables
+        run: make
+      - name: Build shared library
+        run: make shared-metal
+      - name: Build test binary
+        run: make ds4_test
+
+  linux-cuda-x86_64:
+    name: Linux CUDA (x86_64)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install CUDA toolkit
+        run: |
+          wget -q https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb
+          sudo dpkg -i cuda-keyring_1.1-1_all.deb
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cuda-toolkit-13-0
+      - name: Build shared library (CUDA)
+        run: |
+          export PATH="/usr/local/cuda/bin:$PATH"
+          make shared-cuda CUDA_ARCH="$CUDA_ARCH"
+      - name: Build CPU-only variant
+        run: |
+          make clean
+          make cpu
+          make shared-cpu
+
+  linux-cuda-arm64:
+    name: Linux CUDA (arm64, ${{ matrix.variant }})
+    runs-on: ubuntu-24.04-arm
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Mirrors release.yml: sm_121 is the only build that compiles the
+          # MXFP4 kernels, so CI must cover it.
+          - variant: gb10
+            cuda_arch: sm_121
+          - variant: sbsa
+            cuda_arch: compute_90
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install CUDA toolkit
+        run: |
+          wget -q https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/sbsa/cuda-keyring_1.1-1_all.deb
+          sudo dpkg -i cuda-keyring_1.1-1_all.deb
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cuda-toolkit-13-0
+      - name: Build shared library (CUDA)
+        run: |
+          export PATH="/usr/local/cuda/bin:$PATH"
+          make shared-cuda CUDA_ARCH="${{ matrix.cuda_arch }}"
+      - name: Build CPU-only variant
+        if: matrix.variant == 'sbsa'
+        run: |
+          make clean
+          make cpu
+          make shared-cpu
+
+  linux-rocm-x86_64:
+    name: Linux ROCm (x86_64)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install ROCm
+        run: bash .github/scripts/install-rocm-ubuntu.sh
+      - name: Build ROCm executables and shared library
+        run: |
+          export PATH="/opt/rocm/bin:$PATH"
+          export LD_LIBRARY_PATH="/opt/rocm/lib:${LD_LIBRARY_PATH:-}"
+          make rocm ROCM_ARCH="$ROCM_ARCH"
+          make shared-rocm ROCM_ARCH="$ROCM_ARCH"
