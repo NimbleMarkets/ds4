@@ -26,6 +26,13 @@
 #include <cstdint>
 #include <cstdio>
 
+// Route this translation unit's stderr through the ds4 redirection helpers so
+// library consumers that call ds4_set_stderr() see these messages. Must come
+// after the system headers: ds4_stderr.h redefines stderr/abort/exit.
+extern "C" {
+#include "../../ds4_stderr.h"
+}
+
 namespace {
 
 // Debug-only fill telemetry for the partial-tile lever (DS4_MMQ_D2R_STATS=1):

@@ -61,6 +61,11 @@ extern "C" int ds4_mmq_q2_K_moe_down_sum6_vec(
     const void *W, const float *X, const int32_t *ids, float *out,
     int M, int K, int n_tokens, int n_experts, int n_expert_used,
     cudaStream_t stream);
+
+extern "C" {
+#include "ds4_stderr.h"
+}
+
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
