@@ -71822,7 +71822,10 @@ static int ds4_engine_open_internal(ds4_engine **out,
      * server scheduler. Do not allocate a full prefill workspace per session. */
     e->share_session_prefill_workspace = opt->share_session_prefill_workspace ||
         opt->tp.role == DS4_TP_WORKER;
-    ds4_acquire_instance_lock();
+    /* --inspect only reads GGUF metadata and returns before any residency or
+     * GPU allocation, so it does not need the single-instance guard. Taking it
+     * would make inspecting a model impossible while a server is running. */
+    if (!opt->inspect_only) ds4_acquire_instance_lock();
 
     if (opt->simulate_used_memory_bytes != 0 &&
         !ds4_ssd_memory_lock_acquire(&e->simulated_memory,
