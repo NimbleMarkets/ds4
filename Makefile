@@ -54,6 +54,8 @@ NVCCFLAGS ?= -O3 -g -lineinfo --use_fast_math $(NVCC_ARCH_FLAGS) -Xcompiler $(NA
 # Vendored llama.cpp mmq prefill tier (cuda/mmq/, see cuda/mmq/VENDOR.md).
 MMQ_INCLUDES := -Icuda/mmq
 MMQ_OBJS := cuda/mmq/ds4_ggml_stubs.o cuda/mmq/ds4_mmq.o cuda/mmq/ds4_mmq_d2r.o cuda/mmq/quantize.o cuda/mmq/mmid.o cuda/mmq/mmvq.o cuda/mmq/ds4_repack.o
+MMQ_PIC_OBJS := $(MMQ_OBJS:.o=_pic.o)
+MMQ_HEADERS := $(wildcard cuda/mmq/*.cuh cuda/mmq/*.h) ds4_stderr.h
 CORE_OBJS = ds4.o ds4_image.o ds4_distributed.o ds4_tp.o ds4_ssd.o ds4_cuda.o ds4_layer_pack.o ds4_engram.o ds4_stderr.o $(MMQ_OBJS)
 CPU_CORE_OBJS = ds4_cpu.o ds4_image.o ds4_distributed.o ds4_tp.o ds4_ssd.o ds4_layer_pack.o ds4_stderr.o
 CUDA_LDLIBS ?= -lm -Xcompiler -pthread -L$(CUDA_HOME)/targets/sbsa-linux/lib -L$(CUDA_HOME)/lib64 -lcudart -lcublas
@@ -65,13 +67,25 @@ ROCM_LDLIBS ?= -lm -pthread -lhipblas -lhipblaslt -lrocblas
 ROCM_MMQ_Y ?= 64
 ROCM_MMQ_FLAGS := $(ROCM_CFLAGS) -std=c++17 -DGGML_USE_HIP -DDS4_HIP_MMQ_Y=$(ROCM_MMQ_Y) $(MMQ_INCLUDES)
 ROCM_MMQ_OBJS := cuda/mmq/ds4_ggml_stubs.rocm.o cuda/mmq/ds4_mmq.rocm.o cuda/mmq/quantize.rocm.o cuda/mmq/mmid.rocm.o cuda/mmq/mmvq.rocm.o cuda/mmq/d2r_stubs.rocm.o
+ROCM_MMQ_PIC_OBJS := $(ROCM_MMQ_OBJS:.rocm.o=.rocm_pic.o)
 DS4_LINK ?= $(NVCC) $(NVCCFLAGS)
 DS4_LINK_LIBS ?= $(CUDA_LDLIBS)
 METAL_LDLIBS := $(LDLIBS)
 endif
 
+# Shared library exposing the public ds4.h API for FFI consumers, e.g. language
+# bindings that dlopen() libds4 at runtime and resolve its symbols.
+PREFIX ?= /usr/local
+LIBDIR ?= $(PREFIX)/lib
+
+ifeq ($(UNAME_S),Darwin)
+SHLIB := libds4.dylib
+else
+SHLIB := libds4.so
+endif
+
 .PHONY: all help clean test test-rocm test-glm53-kda-rocm test-metal-session-batch test-mxfp4-cuda test-mxfp4-rocm test-cuda-session-batch test-cuda-mixed-batch dspark-acceptance dspark-verify-depth mtp-verify-depth cpu cuda cuda-spark cuda-generic cuda-regression strix-halo rocm \
-	check-metal
+	check-metal shared shared-cpu
 
 ifeq ($(UNAME_S),Darwin)
 .PHONY: metal-decode-schedule-bench metal-prefill-variant-bench session-concurrency-bench check-mxfp4-half-lut
@@ -83,6 +97,8 @@ help:
 	@echo "DS4 build targets:"
 	@echo "  make              Build Metal ./ds4, ./ds4-server, ./ds4-bench, ./ds4-eval, and ./ds4-agent"
 	@echo "  make cpu          Build CPU-only ./ds4, ./ds4-server, ./ds4-bench, ./ds4-eval, and ./ds4-agent"
+	@echo "  make shared-metal Build Metal ./$(SHLIB) (FFI shared library)"
+	@echo "  make shared-cpu   Build CPU-only ./$(SHLIB)"
 	@echo "  make check-metal  Verify #embed can read every Metal source"
 	@echo "  make test         Build and run tests"
 	@echo "  make metal-decode-schedule-bench  Build the balanced Metal decode schedule benchmark"
@@ -279,6 +295,16 @@ cpu: ds4_cli_cpu.o ds4_server_cpu.o ds4_bench_cpu.o ds4_eval_cpu.o ds4_eval_case
 	$(CC) $(CFLAGS) -o ds4-eval ds4_eval_cpu.o ds4_eval_cases.o ds4_help.o $(CPU_CORE_OBJS) $(LDLIBS)
 	$(CC) $(CFLAGS) -o ds4-agent ds4_agent_cpu.o ds4_help.o ds4_prompt_prefix.o ds4_web.o ds4_kvstore.o linenoise.o ds4_gpu_args_cpu.o $(CPU_CORE_OBJS) $(LDLIBS)
 
+shared:
+	@echo "error: make shared is ambiguous; use shared-metal or shared-cpu" >&2
+	@exit 2
+
+shared-metal: ds4_pic.o ds4_distributed_pic.o ds4_tp_pic.o ds4_metal_pic.o ds4_ssd_pic.o ds4_image_pic.o ds4_layer_pack_pic.o ds4_engram_pic.o ds4_stderr_pic.o
+	$(CC) $(CFLAGS) -fPIC -dynamiclib -install_name @rpath/$(SHLIB) -o $(SHLIB) $^ $(METAL_LDLIBS)
+
+shared-cpu: ds4_cpu_pic.o ds4_distributed_pic.o ds4_tp_pic.o ds4_ssd_pic.o ds4_image_pic.o ds4_layer_pack_pic.o ds4_stderr_pic.o
+	$(CC) $(CFLAGS) -fPIC -dynamiclib -install_name @rpath/$(SHLIB) -o $(SHLIB) $^ $(LDLIBS)
+
 cuda-regression:
 	@echo "cuda-regression requires a CUDA build"
 else
@@ -294,6 +320,9 @@ help:
 	@echo "  make test-mxfp4-rocm     Build and run the synthetic ROCm MXFP4 MoE test"
 	@echo "  make test-rocm           Core regression suite on ROCm-only hosts"
 	@echo "  make cpu                 Build CPU-only ./ds4, ./ds4-server, ./ds4-bench, ./ds4-eval, and ./ds4-agent"
+	@echo "  make shared-cuda         Build CUDA ./$(SHLIB) (FFI shared library)"
+	@echo "  make shared-rocm         Build ROCM ./$(SHLIB) (FFI shared library)"
+	@echo "  make shared-cpu          Build CPU-only ./$(SHLIB)"
 	@echo "  make check-metal         Verify #embed can read every Metal source"
 	@echo "  make test                Build and run tests"
 	@echo "  make dspark-verify-depth Run DSpark speculative verification smoke if support GGUF is present"
@@ -462,6 +491,19 @@ cpu: ds4_cli_cpu.o ds4_server_cpu.o ds4_bench_cpu.o ds4_eval_cpu.o ds4_eval_case
 	$(CC) $(CFLAGS) -o ds4-bench ds4_bench_cpu.o ds4_help.o ds4_gpu_args_cpu.o $(CPU_CORE_OBJS) $(LDLIBS)
 	$(CC) $(CFLAGS) -o ds4-eval ds4_eval_cpu.o ds4_eval_cases.o ds4_help.o $(CPU_CORE_OBJS) $(LDLIBS)
 	$(CC) $(CFLAGS) -o ds4-agent ds4_agent_cpu.o ds4_help.o ds4_prompt_prefix.o ds4_web.o ds4_kvstore.o linenoise.o ds4_gpu_args_cpu.o $(CPU_CORE_OBJS) $(LDLIBS)
+
+shared:
+	@echo "error: make shared is ambiguous; use shared-cuda, shared-rocm, or shared-cpu" >&2
+	@exit 2
+
+shared-cuda: ds4_pic.o ds4_distributed_pic.o ds4_tp_pic.o ds4_cuda_pic.o ds4_ssd_pic.o ds4_image_pic.o ds4_layer_pack_pic.o ds4_engram_pic.o ds4_stderr_pic.o $(MMQ_PIC_OBJS)
+	$(NVCC) $(NVCCFLAGS) -Xcompiler -fPIC --shared -o $(SHLIB) $^ $(CUDA_LDLIBS)
+
+shared-rocm: ds4_rocm_core_pic.o ds4_distributed_pic.o ds4_tp_pic.o ds4_rocm_pic.o ds4_rocm_compat_pic.o ds4_rocm_unavailable_pic.o ds4_ssd_pic.o ds4_image_pic.o ds4_layer_pack_pic.o ds4_engram_pic.o ds4_stderr_pic.o $(ROCM_MMQ_PIC_OBJS)
+	$(HIPCC) $(ROCM_CFLAGS) -fPIC -shared -o $(SHLIB) $^ $(ROCM_LDLIBS)
+
+shared-cpu: ds4_cpu_pic.o ds4_distributed_pic.o ds4_tp_pic.o ds4_ssd_pic.o ds4_image_pic.o ds4_layer_pack_pic.o ds4_stderr_pic.o
+	$(CC) $(CFLAGS) -fPIC -shared -Wl,-soname,$(SHLIB) -o $(SHLIB) $^ $(LDLIBS)
 
 cuda-regression: tests/cuda_long_context_smoke
 	./tests/cuda_long_context_smoke
@@ -841,6 +883,70 @@ ds4_rocm_compat.o: ds4_rocm_compat.cu ds4_gpu.h ds4_gpu_tp.h ds4_gpu_mgpu.h ds4_
 ds4_rocm_unavailable.o: ds4_rocm_unavailable.cu
 	$(HIPCC) $(ROCM_CFLAGS) -c -o $@ ds4_rocm_unavailable.cu
 
+# Position-independent objects for the libds4 shared library.  Kept separate
+# from the executable objects above so the perf-tuned binaries are untouched.
+# Upstream keeps adding headers (and dependency-only lines) for the regular
+# objects; the PIC twins would silently go stale, so make them depend on every
+# engine header instead of a hand-maintained list.
+DS4_PIC_HEADERS := $(wildcard ds4*.h ds4*.cuh ds4*.inc)
+ds4_pic.o ds4_rocm_core_pic.o ds4_cpu_pic.o ds4_metal_pic.o ds4_cuda_pic.o ds4_rocm_pic.o: $(DS4_PIC_HEADERS)
+
+ds4_pic.o: ds4.c ds4.h ds4_gpu.h ds4_image.h ds4_engram.h ds4_linux_memory.h ds4_tool_text.h ds4_stderr.h
+	$(CC) $(CFLAGS) -fPIC -c -o $@ ds4.c
+
+ds4_rocm_core_pic.o: ds4.c ds4.h ds4_gpu.h ds4_image.h ds4_linux_memory.h ds4_tool_text.h ds4_stderr.h
+	$(CC) $(CFLAGS) -DDS4_ROCM_BUILD -fPIC -c -o $@ ds4.c
+
+ds4_ssd_pic.o: ds4_ssd.c ds4_ssd.h ds4_stderr.h
+	$(CC) $(CFLAGS) -fPIC -c -o $@ ds4_ssd.c
+
+ds4_image_pic.o: ds4_image.c ds4_image.h third_party/iris/jpeg.h third_party/iris/png.h
+	$(CC) $(CFLAGS) -fPIC -c -o $@ ds4_image.c
+
+ds4_engram_pic.o: ds4_engram.c ds4_engram.h
+	$(CC) $(filter-out -ffast-math,$(CFLAGS)) -fPIC -c -o $@ ds4_engram.c
+
+ds4_cpu_pic.o: ds4.c ds4.h ds4_gpu.h ds4_image.h ds4_linux_memory.h ds4_tool_text.h ds4_stderr.h
+	$(CC) $(CFLAGS) -Wno-unused-function -fPIC -DDS4_NO_GPU -c -o $@ ds4.c
+
+ds4_distributed_pic.o: ds4_distributed.c ds4_distributed.h ds4.h ds4_stderr.h
+	$(CC) $(CFLAGS) -fPIC -c -o $@ ds4_distributed.c
+
+ds4_stderr_pic.o: ds4_stderr.c ds4_stderr.h
+	$(CC) $(CFLAGS) -fPIC -c -o $@ ds4_stderr.c
+
+ds4_tp_pic.o: ds4_tp.c ds4_tp.h ds4.h ds4_ssd.h ds4_stderr.h
+	$(CC) $(CFLAGS) -fPIC -c -o $@ ds4_tp.c
+
+ds4_layer_pack_pic.o: ds4_layer_pack.c ds4_layer_pack.h
+	$(CC) $(CFLAGS) -fPIC -c -o $@ ds4_layer_pack.c
+
+ds4_metal_pic.o: ds4_metal.m ds4_gpu.h ds4_image.h ds4_stderr.h $(METAL_EMBED) $(METAL_SRCS)
+	$(CC) $(OBJCFLAGS) -fPIC -c -o $@ ds4_metal.m
+
+ds4_cuda_pic.o: ds4_cuda.cu ds4_gpu.h ds4_gpu_mgpu.h ds4_glm53_vision_gpu.cuh ds4_deepseek4_vision_gpu.cuh ds4_image.h ds4_stderr.h ds4_iq2_tables_cuda.inc cuda/mmq/ds4_mmq.h
+	$(NVCC) $(NVCCFLAGS) -Xcompiler -fPIC -c -o $@ ds4_cuda.cu
+
+# PIC twins of the vendored mmq objects for the CUDA shared library.
+cuda/mmq/%_pic.o: cuda/mmq/%.cu $(MMQ_HEADERS)
+	$(NVCC) $(NVCCFLAGS) -std=c++17 $(MMQ_INCLUDES) -Xcompiler -fPIC -c -o $@ $<
+
+ds4_rocm_pic.o: ds4_rocm.cu ds4_rocm.h ds4_rocm_memory.h ds4_linux_memory.h ds4_gpu.h ds4_glm53_vision_gpu.cuh ds4_deepseek4_vision_gpu.cuh ds4_image.h ds4_stderr.h ds4_iq2_tables_cuda.inc $(ROCM_SRCS)
+	$(HIPCC) $(ROCM_CFLAGS) -fPIC -c -o $@ ds4_rocm.cu
+
+ds4_rocm_compat_pic.o: ds4_rocm_compat.cu ds4_gpu.h ds4_gpu_mgpu.h ds4_gpu_args.h ds4_rocm_memory.h ds4_linux_memory.h ds4_stderr.h
+	$(HIPCC) $(ROCM_CFLAGS) -fPIC -c -o $@ ds4_rocm_compat.cu
+
+ds4_rocm_unavailable_pic.o: ds4_rocm_unavailable.cu
+	$(HIPCC) $(ROCM_CFLAGS) -fPIC -c -o $@ ds4_rocm_unavailable.cu
+
+# PIC twins of the vendored mmq objects for the ROCm shared library.
+cuda/mmq/%.rocm_pic.o: cuda/mmq/%.cu $(MMQ_HEADERS) ds4_rocm_memory.h ds4_linux_memory.h
+	$(HIPCC) $(ROCM_MMQ_FLAGS) -fPIC -c -o $@ $<
+
+cuda/mmq/d2r_stubs.rocm_pic.o: cuda/mmq/test/d2r_stubs.cu cuda/mmq/ds4_mmq_d2r.cuh cuda/mmq/vendors/hip.h
+	$(HIPCC) $(ROCM_MMQ_FLAGS) -fPIC -c -o $@ $<
+
 tests/cuda_long_context_smoke: tests/cuda_long_context_smoke.o ds4_cuda.o ds4_image.o ds4_stderr.o $(MMQ_OBJS)
 	$(NVCC) $(NVCCFLAGS) -o $@ $^ $(CUDA_LDLIBS)
 
@@ -1104,6 +1210,9 @@ clean:
 	rm -f tests/test_tp_rdma tests/test_tp_link tests/test_tp_tcp
 	rm -f tests/test_metal_tp_spec
 	rm -f tests/test_metal_tp_cancel
+	rm -f ds4 ds4-server ds4-bench ds4-eval ds4-agent ds4_cpu ds4_native ds4_server_test ds4_test ds4_agent_test gguf-tools/quality-testing/score_official gguf-tools/quality-testing/score_official.o speed-bench/metal_decode_schedule_bench speed-bench/metal_prefill_variant_bench speed-bench/*.o tests/test_q4k_dot tests/test_mxfp4_dot tests/test_mxfp4_metal tests/test_mxfp4_rocm tests/test_mxfp4_cuda tests/test_metal_session_batch tests/test_metal_moe_prefill tests/test_metal_dense_mpp tests/test_glm53_kda tests/test_glm53_kda_rocm tests/test_glm53_vision_engine tests/test_glm53_vision_prompt tests/test_deepseek4_vision_image tests/test_prompt_prefix tests/test_gpu_xdev tests/test_gpu_model_cache tests/test_gpu_lookup_cache_strict tests/test_engine_mgpu_refusal tests/test_engine_mgpu_runtime tests/test_engine_correctness tests/test_sampling tests/test_cuda_session_batch tests/test_cuda_mixed_batch tests/*.o *.o tests/cuda_long_context_smoke tests/cuda_long_context_smoke.o
+	rm -f libds4.dylib libds4.so libds4.dll
+
 	rm -f ds4 ds4-server ds4-bench ds4-eval ds4-agent ds4_cpu ds4_native ds4_server_test ds4_test ds4_agent_test gguf-tools/quality-testing/score_official gguf-tools/quality-testing/score_official.o speed-bench/metal_decode_schedule_bench speed-bench/metal_prefill_variant_bench speed-bench/*.o tests/test_q4k_dot tests/test_mxfp4_dot tests/test_mxfp4_metal tests/test_mxfp4_rocm tests/test_mxfp4_cuda tests/test_metal_session_batch tests/test_metal_moe_prefill tests/test_qwen4_moe_mm_specialize tests/test_qwen4_conv_parallel tests/test_q8_prefill_variants tests/test_metal_dense_mpp tests/test_glm53_kda tests/test_glm53_kda_rocm tests/test_glm53_vision_engine tests/test_glm53_vision_prompt tests/test_deepseek4_vision_image tests/test_prompt_prefix tests/test_gpu_xdev tests/test_gpu_model_cache tests/test_gpu_lookup_cache_strict tests/test_engine_mgpu_refusal tests/test_engine_mgpu_runtime tests/test_engine_correctness tests/test_sampling tests/test_cuda_session_batch tests/test_cuda_mixed_batch tests/*.o *.o tests/cuda_long_context_smoke tests/cuda_long_context_smoke.o
 	rm -f tests/test_image_decode
 	rm -f tests/test_qwen4_kernels tests/test_qwen4_cuda tests/test_qwen4_vision tests/test_qwen4_prefill
