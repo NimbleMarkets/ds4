@@ -9,6 +9,10 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
+/* Route stderr through the ds4 redirection helpers (ds4_set_stderr). Must
+ * come after the system headers: ds4_stderr.h redefines stderr/abort/exit. */
+#include "ds4_stderr.h"
+
 #ifndef MAP_ANONYMOUS
 #define MAP_ANONYMOUS MAP_ANON
 #endif

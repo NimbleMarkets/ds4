@@ -24,6 +24,13 @@
 #include <mutex>
 #include <vector>
 
+// Route this translation unit's stderr/abort() through the ds4 redirection
+// helpers so MMQ fatal errors honour ds4_set_stderr() and ds4_abort_set().
+// Must come after the system headers: ds4_stderr.h redefines abort/exit.
+extern "C" {
+#include "../../ds4_stderr.h"
+}
+
 // ----------------------------------------------------------------------------
 // Device info singleton.
 //
