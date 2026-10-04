@@ -57,7 +57,9 @@ make strix-halo
 ./ds4 --rocm
 ```
 
-`make rocm` is an alias. Use the current 0731 Q2 download for a first run;
+`make rocm` is an alias. Both build for `gfx1151` by default; to build one
+binary that also runs on other AMD GPUs, see [ROCm GPU architectures](ROCM.md).
+Use the current 0731 Q2 download for a first run;
 larger mixed and Q4 models have substantially higher memory requirements.
 Flash's ROCm resident and pipeline paths should not be confused with the GLM
 SSD-streaming path.
