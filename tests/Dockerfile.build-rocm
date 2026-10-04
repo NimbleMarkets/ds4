@@ -2,11 +2,14 @@
 #
 # docker build --platform linux/amd64 -f tests/Dockerfile.build-rocm -t ds4-rocm-amd64-build .
 # docker build --platform linux/amd64 --build-arg ROCM_ARCH=gfx1151 -f tests/Dockerfile.build-rocm -t ds4-rocm-gfx1151-build .
+# docker build --platform linux/amd64 --build-arg ROCM_ARCHS="gfx1151 gfx942" -f tests/Dockerfile.build-rocm -t ds4-rocm-multi-build .
 
 FROM ubuntu:24.04
 
 ARG ROCM_VERSION=7.2.4
 ARG ROCM_ARCH=gfx1151
+# Space- or comma-separated list; defaults to the single ROCM_ARCH.
+ARG ROCM_ARCHS=${ROCM_ARCH}
 ARG UBUNTU_CODENAME=noble
 
 # Prevent interactive prompts during installation
@@ -39,7 +42,7 @@ RUN arch=$(dpkg --print-architecture) && \
 ENV ROCM_PATH=/opt/rocm
 ENV PATH="${ROCM_PATH}/bin:${PATH}"
 ENV LD_LIBRARY_PATH="${ROCM_PATH}/lib:${LD_LIBRARY_PATH}"
-ENV ROCM_ARCH=${ROCM_ARCH}
+ENV ROCM_ARCHS=${ROCM_ARCHS}
 
 # Set up working directory
 WORKDIR /workspace
@@ -48,4 +51,4 @@ WORKDIR /workspace
 COPY . .
 
 # Run the ROCm executable and shared library builds.
-CMD ["sh", "-c", "make clean && make rocm ROCM_ARCH=\"$ROCM_ARCH\" && make shared-rocm ROCM_ARCH=\"$ROCM_ARCH\""]
+CMD ["sh", "-c", "make clean && make rocm ROCM_ARCHS=\"$ROCM_ARCHS\" && make shared-rocm ROCM_ARCHS=\"$ROCM_ARCHS\""]

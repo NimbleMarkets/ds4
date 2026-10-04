@@ -1,6 +1,11 @@
 CC ?= cc
 UNAME_S := $(shell uname -s)
 
+# Rewritten only when the arch list changes, so ROCm objects compiled for a
+# different list are rebuilt instead of being linked into a mixed fat binary.
+# (Defined before any rule: prerequisite lists expand when read.)
+ROCM_ARCHS_STAMP := .rocm-archs.stamp
+
 ifeq ($(UNAME_S),Darwin)
 NATIVE_CPU_FLAG ?= -mcpu=native
 else
@@ -60,9 +65,24 @@ CORE_OBJS = ds4.o ds4_image.o ds4_distributed.o ds4_tp.o ds4_ssd.o ds4_cuda.o ds
 CPU_CORE_OBJS = ds4_cpu.o ds4_image.o ds4_distributed.o ds4_tp.o ds4_ssd.o ds4_layer_pack.o ds4_stderr.o
 CUDA_LDLIBS ?= -lm -Xcompiler -pthread -L$(CUDA_HOME)/targets/sbsa-linux/lib -L$(CUDA_HOME)/lib64 -lcudart -lcublas
 HIPCC ?= $(shell command -v hipcc 2>/dev/null || echo /opt/rocm/bin/hipcc)
+# ROCm GPU targets.  ROCM_ARCHS is a space- or comma-separated list of
+# --offload-arch values compiled into one fat binary, for example
+#   make shared-rocm ROCM_ARCHS="gfx1151 gfx1100 gfx942"
+# ROCM_ARCH remains as the single-arch override used by older docs and
+# invocations (make rocm ROCM_ARCH=gfx1100); ROCM_ARCHS wins when both are set.
+# Find your GPU's value with: rocminfo | grep -o 'gfx[0-9a-f]*' | sort -u
 ROCM_ARCH ?= gfx1151
+ROCM_ARCHS ?= $(ROCM_ARCH)
+ROCM_COMMA := ,
+ROCM_EMPTY :=
+ROCM_SPACE := $(ROCM_EMPTY) $(ROCM_EMPTY)
+ROCM_ARCH_LIST = $(strip $(subst $(ROCM_COMMA),$(ROCM_SPACE),$(ROCM_ARCHS)))
+ROCM_OFFLOAD_ARCH_FLAGS = $(foreach a,$(ROCM_ARCH_LIST),--offload-arch=$(a))
+# The compiled list is embedded in the library (ds4_rocm_offload_archs) so a
+# loader can check the host GPU before running any kernel.
+ROCM_ARCHS_DEFINE = -DDS4_ROCM_OFFLOAD_ARCHS='"$(subst $(ROCM_SPACE),$(ROCM_COMMA),$(ROCM_ARCH_LIST))"'
 ROCM_HOST_CFLAGS ?= -fPIC
-ROCM_CFLAGS ?= -O3 -ffast-math -g -fno-finite-math-only -pthread -D__HIP_PLATFORM_AMD__ -Wno-unused-command-line-argument --offload-arch=$(ROCM_ARCH)
+ROCM_CFLAGS ?= -O3 -ffast-math -g -fno-finite-math-only -pthread -D__HIP_PLATFORM_AMD__ -Wno-unused-command-line-argument $(ROCM_OFFLOAD_ARCH_FLAGS)
 ROCM_LDLIBS ?= -lm -pthread -lhipblas -lhipblaslt -lrocblas
 ROCM_MMQ_Y ?= 64
 ROCM_MMQ_FLAGS := $(ROCM_CFLAGS) -std=c++17 -DGGML_USE_HIP -DDS4_HIP_MMQ_Y=$(ROCM_MMQ_Y) $(MMQ_INCLUDES)
@@ -432,7 +452,7 @@ help:
 	@echo "  make cuda-generic        Build CUDA for a generic local CUDA GPU"
 	@echo "  make cuda CUDA_ARCH=sm_N Build CUDA with an explicit nvcc -arch value"
 	@echo "  make strix-halo          Build ROCm for Strix Halo / gfx1151"
-	@echo "  make rocm                Alias for make strix-halo"
+	@echo "  make rocm                Alias for make strix-halo; ROCM_ARCHS=\"gfx942 ...\" for other AMD GPUs"
 	@echo "  make test-mxfp4-rocm     Build and run the synthetic ROCm MXFP4 MoE test"
 	@echo "  make test-rocm           Core regression suite on ROCm-only hosts"
 	@echo "  make cpu                 Build CPU-only ./ds4, ./ds4-server, ./ds4-bench, ./ds4-eval, and ./ds4-agent"
@@ -1297,25 +1317,25 @@ cuda/mmq/mmvq.o: cuda/mmq/mmvq.cu cuda/mmq/mmvq.cuh cuda/mmq/common.cuh cuda/mmq
 cuda/mmq/ds4_repack.o: cuda/mmq/ds4_repack.cu cuda/mmq/ds4_repack.h
 	$(NVCC) $(NVCCFLAGS) -std=c++17 -c -o $@ $<
 
-ds4_rocm.o: ds4_rocm.cu ds4_rocm.h ds4_rocm_memory.h ds4_linux_memory.h ds4_gpu.h ds4_gpu_tp.h ds4_deepseek41_gpu.h ds4_deepseek41_cuda.cuh ds4_glm53_vision_gpu.cuh ds4_deepseek4_vision_gpu.cuh ds4_image.h ds4_iq2_tables_cuda.inc $(ROCM_SRCS) ds4_stderr.h
+ds4_rocm.o: ds4_rocm.cu ds4_rocm.h ds4_rocm_memory.h ds4_linux_memory.h ds4_gpu.h ds4_gpu_tp.h ds4_deepseek41_gpu.h ds4_deepseek41_cuda.cuh ds4_glm53_vision_gpu.cuh ds4_deepseek4_vision_gpu.cuh ds4_image.h ds4_iq2_tables_cuda.inc $(ROCM_SRCS) ds4_stderr.h $(ROCM_ARCHS_STAMP)
 	$(HIPCC) $(ROCM_CFLAGS) -c -o $@ ds4_rocm.cu
 
-cuda/mmq/ds4_ggml_stubs.rocm.o: cuda/mmq/ds4_ggml_stubs.cu cuda/mmq/ds4_ggml_stubs.h cuda/mmq/common.cuh cuda/mmq/vendors/hip.h ds4_rocm_memory.h ds4_linux_memory.h
+cuda/mmq/ds4_ggml_stubs.rocm.o: cuda/mmq/ds4_ggml_stubs.cu cuda/mmq/ds4_ggml_stubs.h cuda/mmq/common.cuh cuda/mmq/vendors/hip.h ds4_rocm_memory.h ds4_linux_memory.h $(ROCM_ARCHS_STAMP)
 	$(HIPCC) $(ROCM_MMQ_FLAGS) -c -o $@ $<
 
-cuda/mmq/ds4_mmq.rocm.o: cuda/mmq/ds4_mmq.cu cuda/mmq/ds4_mmq.h cuda/mmq/mmq.cuh cuda/mmq/common.cuh cuda/mmq/ds4_ggml_stubs.h cuda/mmq/quantize.cuh cuda/mmq/mmid.cuh cuda/mmq/vecdotq.cuh cuda/mmq/mma.cuh cuda/mmq/vendors/hip.h
+cuda/mmq/ds4_mmq.rocm.o: cuda/mmq/ds4_mmq.cu cuda/mmq/ds4_mmq.h cuda/mmq/mmq.cuh cuda/mmq/common.cuh cuda/mmq/ds4_ggml_stubs.h cuda/mmq/quantize.cuh cuda/mmq/mmid.cuh cuda/mmq/vecdotq.cuh cuda/mmq/mma.cuh cuda/mmq/vendors/hip.h $(ROCM_ARCHS_STAMP)
 	$(HIPCC) $(ROCM_MMQ_FLAGS) -c -o $@ $<
 
-cuda/mmq/quantize.rocm.o: cuda/mmq/quantize.cu cuda/mmq/quantize.cuh cuda/mmq/common.cuh cuda/mmq/ds4_ggml_stubs.h cuda/mmq/mmq.cuh cuda/mmq/vendors/hip.h
+cuda/mmq/quantize.rocm.o: cuda/mmq/quantize.cu cuda/mmq/quantize.cuh cuda/mmq/common.cuh cuda/mmq/ds4_ggml_stubs.h cuda/mmq/mmq.cuh cuda/mmq/vendors/hip.h $(ROCM_ARCHS_STAMP)
 	$(HIPCC) $(ROCM_MMQ_FLAGS) -c -o $@ $<
 
-cuda/mmq/mmid.rocm.o: cuda/mmq/mmid.cu cuda/mmq/mmid.cuh cuda/mmq/common.cuh cuda/mmq/ds4_ggml_stubs.h cuda/mmq/vendors/hip.h
+cuda/mmq/mmid.rocm.o: cuda/mmq/mmid.cu cuda/mmq/mmid.cuh cuda/mmq/common.cuh cuda/mmq/ds4_ggml_stubs.h cuda/mmq/vendors/hip.h $(ROCM_ARCHS_STAMP)
 	$(HIPCC) $(ROCM_MMQ_FLAGS) -c -o $@ $<
 
-cuda/mmq/mmvq.rocm.o: cuda/mmq/mmvq.cu cuda/mmq/mmvq.cuh cuda/mmq/common.cuh cuda/mmq/ds4_ggml_stubs.h cuda/mmq/quantize.cuh cuda/mmq/vecdotq.cuh cuda/mmq/unary.cuh cuda/mmq/vendors/hip.h
+cuda/mmq/mmvq.rocm.o: cuda/mmq/mmvq.cu cuda/mmq/mmvq.cuh cuda/mmq/common.cuh cuda/mmq/ds4_ggml_stubs.h cuda/mmq/quantize.cuh cuda/mmq/vecdotq.cuh cuda/mmq/unary.cuh cuda/mmq/vendors/hip.h $(ROCM_ARCHS_STAMP)
 	$(HIPCC) $(ROCM_MMQ_FLAGS) -c -o $@ $<
 
-cuda/mmq/d2r_stubs.rocm.o: cuda/mmq/test/d2r_stubs.cu cuda/mmq/ds4_mmq_d2r.cuh cuda/mmq/vendors/hip.h
+cuda/mmq/d2r_stubs.rocm.o: cuda/mmq/test/d2r_stubs.cu cuda/mmq/ds4_mmq_d2r.cuh cuda/mmq/vendors/hip.h $(ROCM_ARCHS_STAMP)
 	$(HIPCC) $(ROCM_MMQ_FLAGS) -c -o $@ $<
 
 tests/test_mxfp4_rocm.o: tests/test_mxfp4_rocm.c ds4_gpu.h
@@ -1333,10 +1353,10 @@ tests/bench_mxfp4_rocm: tests/bench_mxfp4_rocm.o ds4_rocm.o ds4_rocm_unavailable
 test-mxfp4-rocm: tests/test_mxfp4_rocm
 	./tests/test_mxfp4_rocm
 
-ds4_rocm_compat.o: ds4_rocm_compat.cu ds4_gpu.h ds4_gpu_tp.h ds4_gpu_mgpu.h ds4_gpu_args.h ds4_rocm_memory.h ds4_linux_memory.h
-	$(HIPCC) $(ROCM_CFLAGS) -c -o $@ ds4_rocm_compat.cu
+ds4_rocm_compat.o: ds4_rocm_compat.cu ds4_gpu.h ds4_gpu_tp.h ds4_gpu_mgpu.h ds4_gpu_args.h ds4_rocm_memory.h ds4_linux_memory.h $(ROCM_ARCHS_STAMP)
+	$(HIPCC) $(ROCM_CFLAGS) $(ROCM_ARCHS_DEFINE) -c -o $@ ds4_rocm_compat.cu
 
-ds4_rocm_unavailable.o: ds4_rocm_unavailable.cu
+ds4_rocm_unavailable.o: ds4_rocm_unavailable.cu $(ROCM_ARCHS_STAMP)
 	$(HIPCC) $(ROCM_CFLAGS) -c -o $@ ds4_rocm_unavailable.cu
 
 # Position-independent objects for the libds4 shared library.  Kept separate
@@ -1387,20 +1407,20 @@ ds4_cuda_pic.o: ds4_cuda.cu ds4_gpu.h ds4_gpu_copy.h ds4_gpu_tp.h ds4_gpu_mgpu.h
 cuda/mmq/%_pic.o: cuda/mmq/%.cu $(MMQ_HEADERS)
 	$(NVCC) $(NVCCFLAGS) -std=c++17 $(MMQ_INCLUDES) -Xcompiler -fPIC -c -o $@ $<
 
-ds4_rocm_pic.o: ds4_rocm.cu ds4_rocm.h ds4_rocm_memory.h ds4_linux_memory.h ds4_gpu.h ds4_glm53_vision_gpu.cuh ds4_deepseek4_vision_gpu.cuh ds4_image.h ds4_stderr.h ds4_iq2_tables_cuda.inc $(ROCM_SRCS)
+ds4_rocm_pic.o: ds4_rocm.cu ds4_rocm.h ds4_rocm_memory.h ds4_linux_memory.h ds4_gpu.h ds4_glm53_vision_gpu.cuh ds4_deepseek4_vision_gpu.cuh ds4_image.h ds4_stderr.h ds4_iq2_tables_cuda.inc $(ROCM_SRCS) $(ROCM_ARCHS_STAMP)
 	$(HIPCC) $(ROCM_CFLAGS) -fPIC -c -o $@ ds4_rocm.cu
 
-ds4_rocm_compat_pic.o: ds4_rocm_compat.cu ds4_gpu.h ds4_gpu_mgpu.h ds4_gpu_args.h ds4_rocm_memory.h ds4_linux_memory.h ds4_stderr.h
-	$(HIPCC) $(ROCM_CFLAGS) -fPIC -c -o $@ ds4_rocm_compat.cu
+ds4_rocm_compat_pic.o: ds4_rocm_compat.cu ds4_gpu.h ds4_gpu_mgpu.h ds4_gpu_args.h ds4_rocm_memory.h ds4_linux_memory.h ds4_stderr.h $(ROCM_ARCHS_STAMP)
+	$(HIPCC) $(ROCM_CFLAGS) $(ROCM_ARCHS_DEFINE) -fPIC -c -o $@ ds4_rocm_compat.cu
 
-ds4_rocm_unavailable_pic.o: ds4_rocm_unavailable.cu
+ds4_rocm_unavailable_pic.o: ds4_rocm_unavailable.cu $(ROCM_ARCHS_STAMP)
 	$(HIPCC) $(ROCM_CFLAGS) -fPIC -c -o $@ ds4_rocm_unavailable.cu
 
 # PIC twins of the vendored mmq objects for the ROCm shared library.
-cuda/mmq/%.rocm_pic.o: cuda/mmq/%.cu $(MMQ_HEADERS) ds4_rocm_memory.h ds4_linux_memory.h
+cuda/mmq/%.rocm_pic.o: cuda/mmq/%.cu $(MMQ_HEADERS) ds4_rocm_memory.h ds4_linux_memory.h $(ROCM_ARCHS_STAMP)
 	$(HIPCC) $(ROCM_MMQ_FLAGS) -fPIC -c -o $@ $<
 
-cuda/mmq/d2r_stubs.rocm_pic.o: cuda/mmq/test/d2r_stubs.cu cuda/mmq/ds4_mmq_d2r.cuh cuda/mmq/vendors/hip.h
+cuda/mmq/d2r_stubs.rocm_pic.o: cuda/mmq/test/d2r_stubs.cu cuda/mmq/ds4_mmq_d2r.cuh cuda/mmq/vendors/hip.h $(ROCM_ARCHS_STAMP)
 	$(HIPCC) $(ROCM_MMQ_FLAGS) -fPIC -c -o $@ $<
 
 tests/cuda_long_context_smoke: tests/cuda_long_context_smoke.o ds4_cuda.o ds4_image.o ds4_stderr.o $(MMQ_OBJS)
@@ -1646,7 +1666,14 @@ ds4_test.o ds4_agent_test.o \
 ds4_cpu_test_hooks.o ds4_cuda_test_hooks.o tests/test_session_state.o \
 tests/test_session_state_gpu.o: ds4_tool_text.h
 
+$(ROCM_ARCHS_STAMP): FORCE
+	@echo '$(ROCM_ARCH_LIST)' | cmp -s - $@ || echo '$(ROCM_ARCH_LIST)' > $@
+
+.PHONY: FORCE
+FORCE:
+
 clean:
+	rm -f $(ROCM_ARCHS_STAMP)
 	rm -f tests/test_mmvq_cuda tests/test_mmvq_rocm
 	rm -f tests/test_qwen4_ngrams
 	rm -f tests/test_qwen4_memory tests/test_qwen4_mtp_policy tests/test_qwen4_ssd_experts

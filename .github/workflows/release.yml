@@ -31,7 +31,13 @@ env:
   # path, "the fastest path on GB10") and relies on CUDA 13's modern default.
   CUDA_ARCH: compute_75
   ROCM_VERSION: 7.2.4
-  ROCM_ARCH: gfx1151
+  # AMD GPU targets compiled into one fat libds4 (Makefile ROCM_ARCHS).
+  # gfx1151 (Strix Halo) and gfx942 (MI300-class, wave64) are verified on
+  # hardware; gfx1100/1101/1102 (RDNA3) and gfx1200/1201 (RDNA4) compile from
+  # the same sources but are experimental until someone runs ds4-eval on one.
+  # See docs/ROCM.md for build-time and size numbers. When changing this list,
+  # update README.md and docs/ROCM.md here and the ds4go README/INSTALL.md.
+  ROCM_ARCHS: gfx1151 gfx1100 gfx1101 gfx1102 gfx1200 gfx1201 gfx942
 
 jobs:
   macos-metal-arm64:
@@ -156,13 +162,16 @@ jobs:
         run: |
           export PATH="/opt/rocm/bin:$PATH"
           export LD_LIBRARY_PATH="/opt/rocm/lib:${LD_LIBRARY_PATH:-}"
-          make shared-rocm NATIVE_CPU_FLAG="$CPU_FLAG_X86" ROCM_ARCH="$ROCM_ARCH"
+          make shared-rocm NATIVE_CPU_FLAG="$CPU_FLAG_X86" ROCM_ARCHS="$ROCM_ARCHS"
+          # Loaders (ds4go) read this symbol to check the host GPU.
+          nm -D libds4.so | grep -q ' ds4_rocm_offload_archs$'
 
       - name: Package
         run: |
           PKG="libds4-${GITHUB_REF_NAME}-linux-x86_64-rocm"
           mkdir -p "$PKG"
           cp libds4.so ds4.h ds4_ssd.h LICENSE "$PKG/"
+          printf '%s\n' "$ROCM_ARCHS" > "$PKG/ROCM_ARCHS"
           tar -czf "$PKG.tar.gz" "$PKG"
 
       - uses: actions/upload-artifact@v4

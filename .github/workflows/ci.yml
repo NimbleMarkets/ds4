@@ -21,7 +21,13 @@ env:
   # path, "the fastest path on GB10") and relies on CUDA 13's modern default.
   CUDA_ARCH: compute_75
   ROCM_VERSION: 7.2.4
-  ROCM_ARCH: gfx1151
+  # AMD GPU targets compiled into one fat libds4 (Makefile ROCM_ARCHS).
+  # gfx1151 (Strix Halo) and gfx942 (MI300-class, wave64) are verified on
+  # hardware; gfx1100/1101/1102 (RDNA3) and gfx1200/1201 (RDNA4) compile from
+  # the same sources but are experimental until someone runs ds4-eval on one.
+  # See docs/ROCM.md for build-time and size numbers. Keep in sync with
+  # release.yml.
+  ROCM_ARCHS: gfx1151 gfx1100 gfx1101 gfx1102 gfx1200 gfx1201 gfx942
 
 jobs:
   macos-metal:
@@ -102,5 +108,5 @@ jobs:
         run: |
           export PATH="/opt/rocm/bin:$PATH"
           export LD_LIBRARY_PATH="/opt/rocm/lib:${LD_LIBRARY_PATH:-}"
-          make rocm ROCM_ARCH="$ROCM_ARCH"
-          make shared-rocm ROCM_ARCH="$ROCM_ARCH"
+          make rocm ROCM_ARCHS="$ROCM_ARCHS"
+          make shared-rocm ROCM_ARCHS="$ROCM_ARCHS"
