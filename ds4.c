@@ -45423,8 +45423,12 @@ static bool glm_graph_memory_guard_budget(
         budget_base = ds4_gpu_recommended_working_set_size();
     }
 #ifdef DS4_ROCM_BUILD
+    /* Only integrated APUs allocate from host RAM; a discrete GPU's budget
+     * is its VRAM, which may exceed host memory. */
+    const bool rocm_uses_host_memory = ds4_gpu_uses_host_memory();
     uint64_t host_available = 0;
-    const bool host_memory_known = ds4_linux_nonmovable_memory(&host_available);
+    const bool host_memory_known = rocm_uses_host_memory &&
+        ds4_linux_nonmovable_memory(&host_available);
     if (!ssd_streaming && host_memory_known) {
         /* The resident model is charged in model_bytes below. Keep the
          * pre-upload availability baseline so later session guards do not
@@ -70912,11 +70916,15 @@ static int ds4_engine_open_internal(ds4_engine **out,
         }
         bool glm_backend_supported = ds4_backend_uses_graph(e->backend);
 #ifdef DS4_ROCM_BUILD
+        /* Integrated APUs cannot hold the full DSA model in shared host RAM.
+         * Discrete GPUs upload weights to VRAM; the memory guard below
+         * decides whether the resident model fits. */
         const bool rocm_full_model_requires_streaming =
             e->backend == DS4_BACKEND_CUDA &&
             !e->ssd_streaming &&
             !load_slice &&
-            !ds4_model_is_glm53();
+            !ds4_model_is_glm53() &&
+            ds4_gpu_uses_host_memory();
         if (rocm_full_model_requires_streaming) {
             glm_backend_supported = false;
         }
@@ -70925,9 +70933,9 @@ static int ds4_engine_open_internal(ds4_engine **out,
 #ifdef DS4_ROCM_BUILD
             if (rocm_full_model_requires_streaming) {
                 fprintf(stderr,
-                        "ds4: full-model GLM DSA ROCm inference requires "
-                        "--ssd-streaming; distributed layer slices can run "
-                        "fully resident\n");
+                        "ds4: full-model GLM DSA inference on an integrated "
+                        "ROCm GPU requires --ssd-streaming; distributed layer "
+                        "slices can run fully resident\n");
             } else {
                 fprintf(stderr,
                         "ds4: GLM 5.2 inference requires the ROCm graph "
