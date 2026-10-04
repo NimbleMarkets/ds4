@@ -726,18 +726,18 @@ __device__ static void dev_dot_q2_K_q8_K_block8(
 }
 
 __device__ static float half_warp_sum_f32(float v, uint32_t lane16) {
-    uint32_t mask = 0xffffu << (threadIdx.x & 16u);
+    const MASK_T mask = DS4_LANE_GROUP_MASK(16);
     for (int offset = 8; offset > 0; offset >>= 1) {
-        v += __shfl_down_sync(static_cast<MASK_T>(mask), v, offset, 16);
+        v += __shfl_down_sync(mask, v, offset, 16);
     }
     (void)lane16;
     return v;
 }
 
 __device__ static float quarter_warp_sum_f32(float v, uint32_t lane8) {
-    uint32_t mask = 0xffu << (threadIdx.x & 24u);
+    const MASK_T mask = DS4_LANE_GROUP_MASK(8);
     for (int offset = 4; offset > 0; offset >>= 1) {
-        v += __shfl_down_sync(static_cast<MASK_T>(mask), v, offset, 8);
+        v += __shfl_down_sync(mask, v, offset, 8);
     }
     (void)lane8;
     return v;

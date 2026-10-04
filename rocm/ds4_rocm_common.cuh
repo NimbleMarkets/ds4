@@ -15,10 +15,44 @@ static int ds4_rocm_is_gfx1151(void) {
     return cached;
 }
 
+/* Hardware wavefront is 32 lanes (RDNA).  Kernels that split a block into
+ * 32-thread "warps" (wave = tid >> 5) and issue wave-collective rocWMMA ops
+ * per warp only work when that warp is a whole wavefront; on wave64 (CDNA:
+ * gfx90a/gfx942/gfx950) two of them share one wave and the fragments are
+ * corrupted.  Gate such launches on this until they get a wave64 layout. */
+static int ds4_rocm_is_wave32(void) {
+    static int cached = -1;
+    if (cached >= 0) return cached;
+    int dev = 0;
+    cudaDeviceProp prop;
+    cached = cudaGetDevice(&dev) == cudaSuccess &&
+             cudaGetDeviceProperties(&prop, dev) == cudaSuccess &&
+             prop.warpSize == 32;
+    return cached;
+}
+
+/* RDNA3/3.5 (gfx11xx) wave32 WMMA builtins.  Kernels that call
+ * __builtin_amdgcn_wmma_*_w32 directly compile to a trap on other targets
+ * (CDNA is wave64 with MFMA; RDNA4 uses the gfx12 WMMA encoding), so their
+ * launches must be gated on this. */
+static int ds4_rocm_has_gfx11_wmma(void) {
+    static int cached = -1;
+    if (cached >= 0) return cached;
+    int dev = 0;
+    cudaDeviceProp prop;
+    cached = cudaGetDevice(&dev) == cudaSuccess &&
+             cudaGetDeviceProperties(&prop, dev) == cudaSuccess &&
+             strncmp(prop.gcnArchName, "gfx11", 5) == 0;
+    return cached;
+}
+
 /* The tuned paths are the production default on gfx1151. Setting an
  * individual selector to 0 keeps a simple fallback/debug escape hatch. */
 static int ds4_rocm_gfx1151_flag(const char *name) {
     const char *env = getenv(name);
+    /* The tuned kernels assume wave32; an env override cannot enable them on
+     * wave64 hardware, where they trap or corrupt results. */
+    if (!ds4_rocm_is_wave32()) return 0;
     return env ? env[0] != '0' : ds4_rocm_is_gfx1151();
 }
 
