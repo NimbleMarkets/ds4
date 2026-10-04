@@ -152,6 +152,10 @@ extern "C" uint64_t ds4_gpu_recommended_working_set_size(void) {
     return (uint64_t)total_b;
 }
 
+extern "C" bool ds4_gpu_uses_host_memory(void) {
+    return ds4_rocm_uses_host_ram();
+}
+
 extern "C" uint32_t ds4_gpu_stream_expert_cache_configured_count(void) {
     return g_ssd_streaming_mode ? g_stream_expert_cache_budget : 0;
 }
