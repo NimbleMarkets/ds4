@@ -633,6 +633,7 @@ __global__ static void matmul_q8_0_f32_batch_wmma_rowtile_kernel(
         uint32_t in_dim,
         uint32_t out_dim,
         uint64_t row_bytes) {
+#if !defined(__HIP_DEVICE_COMPILE__) || defined(__GFX11__)
     constexpr uint32_t N_TILE = 64u;
     constexpr uint32_t K_TILE = 32u;
     constexpr uint32_t M_PER_WARP = M_TILE / WARPS;
@@ -725,6 +726,11 @@ __global__ static void matmul_q8_0_f32_batch_wmma_rowtile_kernel(
             if (row < out_dim) out[(uint64_t)tok * out_dim + row] = acc[j];
         }
     }
+#else
+    /* gfx11 WMMA only; the host gates launches on ds4_rocm_has_gfx11_wmma(). */
+    (void)out; (void)w; (void)x; (void)n_tokens; (void)in_dim; (void)out_dim; (void)row_bytes;
+    __builtin_trap();
+#endif
 }
 
 #endif

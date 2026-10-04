@@ -616,7 +616,7 @@ extern "C" int ds4_gpu_attention_indexed_mixed_batch_heads_tensor(
                 return cuda_ok(cudaGetLastError(), "attention indexed wmma32 launch");
             }
             const char *wmma_env = getenv("DS4_ROCM_ATTN_WMMA16_INDEXED");
-            const bool use_wmma = wmma_env && wmma_env[0] != '\0' && wmma_env[0] != '0';
+            const bool use_wmma = wmma_env && wmma_env[0] != '\0' && wmma_env[0] != '0' && ds4_rocm_is_wave32();
             if (use_wmma) {
                 dim3 grid(n_tokens, (n_head + 15u) / 16u, 1);
                 attention_mixed_heads16_wmma_kernel<1, 16><<<grid, 256>>>((float *)heads->ptr,
@@ -861,7 +861,7 @@ static int attention_prefill_mixed_launch(
         !g_quality_mode &&
         ((window != 0u ? window : n_tokens) + n_comp <= 768u)) {
         const char *wmma_env = getenv("DS4_ROCM_ATTN_WMMA16");
-        const bool use_wmma = wmma_env && wmma_env[0] != '\0' && wmma_env[0] != '0';
+        const bool use_wmma = wmma_env && wmma_env[0] != '\0' && wmma_env[0] != '0' && ds4_rocm_is_wave32();
         if (use_wmma) {
             dim3 grid(n_tokens, (n_head + 15u) / 16u, 1);
             attention_mixed_heads16_wmma_kernel<0, 16><<<grid, 256>>>((float *)heads->ptr,

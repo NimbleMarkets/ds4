@@ -900,7 +900,7 @@ static int indexer_scores_launch(
                                                          scale, causal ? 1 : 0);
         return cuda_ok(cudaGetLastError(), "indexer score one direct launch");
     }
-    if (!g_quality_mode && head_dim == 128u && n_head == 64u) {
+    if (!g_quality_mode && ds4_rocm_is_wave32() && head_dim == 128u && n_head == 64u) {
         dim3 grid((n_comp + 127u) / 128u, (n_tokens + 15u) / 16u, 1);
         indexer_scores_wmma128_kernel<<<grid, 256>>>((float *)scores->ptr,
                                                      (const float *)q->ptr,

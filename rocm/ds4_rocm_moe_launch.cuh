@@ -240,7 +240,7 @@ static int routed_moe_q2_float_down_launch(
     const uint32_t hot_threshold = 8u;
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
     const int use_wmma_hot = n_tokens >= hot_threshold && hot_experts_dev &&
-        !g_quality_mode &&
+        !g_quality_mode && ds4_rocm_is_wave32() &&
         (expert_mid_dim % 16u) == 0u && (out_dim % 16u) == 0u;
 #else
     const int use_wmma_hot = 0;
@@ -1164,7 +1164,7 @@ static int routed_moe_launch(
             n_tokens >= iq2_gate_hot_threshold && n_expert == 6u && !write_gate_up &&
             sorted_pairs && sorted_offsets && sorted_counts && tile_experts && iq2_gate_hot_dev && use_expert_tiles &&
             (expert_in_dim % 16u) == 0u && (expert_mid_dim % 16u) == 0u &&
-            !g_quality_mode;
+            !g_quality_mode && ds4_rocm_is_wave32();
         if (use_iq2_gate_wmma) {
             uint32_t h_counts[DS4_ROCM_MAX_N_EXPERT] = {0};
             if (!cuda_ok(cudaMemcpy(h_counts, sorted_counts, n_total_expert * sizeof(uint32_t), cudaMemcpyDeviceToHost),
@@ -2190,7 +2190,7 @@ static int routed_moe_launch(
         const uint64_t f16_low_gate_bytes = (uint64_t)bucket_count * sizeof(uint32_t);
         const uint64_t f16_low_down_bytes = (uint64_t)bucket_count * sizeof(uint32_t);
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-        const int moe_wmma_hot = !g_quality_mode &&
+        const int moe_wmma_hot = !g_quality_mode && ds4_rocm_is_wave32() &&
                                  expert_in_dim % 16u == 0u &&
                                  expert_mid_dim % 16u == 0u &&
                                  out_dim % 16u == 0u;

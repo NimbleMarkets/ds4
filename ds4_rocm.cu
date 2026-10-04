@@ -3,8 +3,18 @@
 #include <hipblaslt/hipblaslt.h>
 #include <rocblas/rocblas.h>
 
-#define FULL_WARP_MASK 0xFFFFFFFFFFFFFFFFULL
 #define MASK_T uint64_t
+/* Mask of the aligned WIDTH-lane shuffle group holding this thread, relative
+ * to the hardware wavefront: lanes 0..31 on RDNA (wave32) but 0..63 on CDNA
+ * (wave64).  HIP's *_sync builtins trap when the calling lane is not in the
+ * mask, so deriving it from threadIdx.x & 31-style arithmetic breaks wave64. */
+#define DS4_LANE_GROUP_MASK(width) \
+    ((MASK_T)((1ull << (width)) - 1ull) << (__lane_id() & ~((unsigned)(width) - 1u)))
+/* The kernels treat 32 lanes as a warp (CUDA semantics).  On wave64 two such
+ * warps share one wavefront and HIP requires a *_sync mask to equal exactly
+ * the active lanes using it, so "the whole warp" means this lane's 32-lane
+ * half.  On wave32 this is the full 0xffffffff mask. */
+#define FULL_WARP_MASK DS4_LANE_GROUP_MASK(32)
 #define DS4_GPU_BACKEND_NAME "ROCm"
 #define DS4_GPU_LOG_PREFIX "ds4: ROCm "
 #define DS4_GPU_BLAS_NAME "hipBLAS"
@@ -17,6 +27,8 @@
 
 #define FULL_WARP_MASK 0xFFFFFFFFu
 #define MASK_T uint32_t
+#define DS4_LANE_GROUP_MASK(width) \
+    ((MASK_T)((1u << (width)) - 1u) << (threadIdx.x & (32u - (width))))
 #define DS4_GPU_BACKEND_NAME "CUDA"
 #define DS4_GPU_LOG_PREFIX "ds4: CUDA "
 #define DS4_GPU_BLAS_NAME "cuBLAS"
