@@ -16,6 +16,18 @@ extern "C" {
 #include "ds4_stderr.h"
 }
 
+#ifndef DS4_ROCM_OFFLOAD_ARCHS
+#define DS4_ROCM_OFFLOAD_ARCHS ""
+#endif
+
+/* Comma-separated --offload-arch list this binary was built for (Makefile
+ * ROCM_ARCHS).  Exported as plain data so loaders can read it from the ELF
+ * dynamic symbol table and compare it with the host GPU before loading the
+ * library or launching a kernel; an arch mismatch otherwise only surfaces as
+ * "invalid device function" on the first launch. */
+extern "C" __attribute__((visibility("default"), used))
+const char ds4_rocm_offload_archs[] = DS4_ROCM_OFFLOAD_ARCHS;
+
 ds4_gpu_ctx g_gpu[DS4_MAX_GPUS] = {};
 int g_n_gpus = 1;
 int g_gpu_peer_ok[DS4_MAX_GPUS][DS4_MAX_GPUS] = {{1}};

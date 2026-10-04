@@ -26,7 +26,14 @@ The repository also includes tools and data for GGUF, imatrix, quality, and spee
   can use SSD streaming. SSD streaming is also needed in order to run very
   large models such as full GLM 5.x (not Flash) on 128GB systems.
 * **NVIDIA CUDA**, the DGX Spark is our main gaol. DwarfStar also supports multi-GPU systems that are not supported by other backends, for instance it can run DeepSeek v4 Flash on Ada Lovelace cards.
-* **ROCm** on Strix Halo systems such as the Framework Desktop.
+* **ROCm** on Strix Halo systems such as the Framework Desktop (`gfx1151`)
+  and AMD Instinct MI300-class GPUs (`gfx942`). The release ROCm library is one
+  fat binary for `gfx1151 gfx1100 gfx1101 gfx1102 gfx1200 gfx1201 gfx942`.
+  `gfx1151` and `gfx942` are verified; the RDNA3 (`gfx110x`) and RDNA4
+  (`gfx120x`) targets are experimental. Build for any other AMD GPU with
+  `ROCM_ARCHS`; see [ROCm GPU architectures](docs/ROCM.md). LLVM generic
+  targets such as `gfx11-generic` are not supported, because rocWMMA requires a
+  concrete chip.
 
 This project would not exist without **llama.cpp and GGML**, make sure to read
 the acknowledgements section, a big thank you to Georgi Gerganov and all the
@@ -97,6 +104,7 @@ and hardware-specific setups:
 | [Metal on Apple Silicon](docs/METAL.md) | `make` |
 | [DGX Spark](docs/DGX_SPARK.md) | `make cuda-spark` |
 | [Strix Halo / Framework Desktop](docs/STRIX_HALO.md) | `make strix-halo` |
+| [Other AMD GPUs (ROCm)](docs/ROCM.md) | `make rocm ROCM_ARCHS=gfxNNNN` |
 | [One or more CUDA cards, including Ada/L40S](docs/CUDA_MULTI_GPU.md) | `make cuda-generic` |
 
 For a first run on a 96 or 128 GB machine, download DeepSeek V4 Flash Q2:
