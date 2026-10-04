@@ -516,6 +516,9 @@ int ds4_gpu_stream_expert_cache_prepare_selected_batch(
         uint32_t                           n_selected);
 #endif
 #ifdef DS4_ROCM_BUILD
+/* True when the ROCm device is an integrated APU (e.g. Strix Halo) whose
+ * allocations come out of host RAM; false for discrete GPUs with VRAM. */
+bool ds4_gpu_uses_host_memory(void);
 int ds4_gpu_stream_expert_cache_load_layer(
         const ds4_gpu_stream_expert_table *table);
 int ds4_gpu_stream_expert_cache_seed_from_layer_selected(
